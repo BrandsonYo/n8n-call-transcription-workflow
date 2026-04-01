@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-03-15T13:02:45.777Z",
+  "updatedAt": "2026-03-25T02:01:39.751Z",
   "createdAt": "2026-03-11T13:38:57.175Z",
   "id": "eUsM5MVxOsrEMDGx",
   "name": "Call Transcription & Analysis (WF3)",
@@ -9,12 +9,12 @@
   "nodes": [
     {
       "parameters": {
-        "content": "## WF3 \u2014 Discovery Call Transcription\n\n**Trigger:** New audio file in Google Drive `Discovery Calls/incoming/`\n\n**What it does:**\n1. Extracts phone number from Oppo A5 filename\n2. Matches phone against Leads sheet\n3. If not a lead \u2192 stops immediately, file stays in incoming/ (personal call)\n4. Downloads audio \u2192 uploads to AssemblyAI \u2192 transcribes with speaker diarization\n5. Analyses transcript with Claude (pain points, CRM, interest level, next steps)\n6. Logs structured analysis + full transcript to 'Discovery Calls' tab\n7. Updates Outcome column in Leads tab\n8. Sends SMS summary to Brandon\n9. Moves file to `processed/`\n\n**Filename format (Oppo A5 built-in recorder):**\n`+6421XXXXXXX-YYMMDDHHMM.awb`",
+        "content": "## WF3 \u2014 Discovery Call Transcription\n\n**Trigger:** New audio file in Google Drive `Discovery Calls/incoming/`\n\n**What it does:**\n1. Extracts phone number from Oppo A5 filename\n2. Matches phone against Leads sheet\n3. If not a lead \u2192 stops immediately, file stays in incoming/ (personal call)\n4. Downloads audio \u2192 uploads to AssemblyAI \u2192 polls until transcription complete\n5. Analyses transcript with Claude (pain points, CRM, interest level, next steps)\n6. Logs structured analysis + full transcript to 'Discovery Calls' tab\n7. Updates Outcome column in Leads tab\n8. Sends SMS summary to Brandon\n9. Moves file to `processed/`\n\n**Filename format (Oppo A5 built-in recorder):**\n`+6421XXXXXXX-YYMMDDHHMM.awb`",
         "height": 400,
         "width": 480,
         "color": 4
       },
-      "id": "7aefd6cf-2fb0-4ff3-9bc0-30937b9e7673",
+      "id": "c9bf3f93-8836-49c8-b4e2-bf4dc0cfbdcb",
       "name": "Workflow Description",
       "type": "n8n-nodes-base.stickyNote",
       "typeVersion": 1,
@@ -41,13 +41,13 @@
         "event": "fileCreated",
         "options": {}
       },
-      "id": "28a23ccc-108c-44d1-af97-92ef31badc5b",
+      "id": "366500f7-e12f-4ed1-af2f-18d954e5c962",
       "name": "Google Drive Trigger",
       "type": "n8n-nodes-base.googleDriveTrigger",
       "typeVersion": 1,
       "position": [
         368,
-        376
+        384
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
@@ -60,13 +60,13 @@
       "parameters": {
         "jsCode": "const filename = $input.item.json.name || '';\nconst fileId   = $input.item.json.id   || '';\n\nfunction normalizePhone(raw) {\n  if (!raw) return null;\n  const cleaned = raw.replace(/[\\s\\-\\(\\)]/g, '');\n  if (raw.startsWith('+64'))              return raw.replace(/[\\s\\-\\(\\)]/g, '');\n  if (cleaned.startsWith('64') && cleaned.length >= 11) return '+' + cleaned;\n  if (cleaned.startsWith('0'))            return '+64' + cleaned.slice(1);\n  return null;\n}\n\n// Oppo A5 built-in recorder format: {phone_number}-YYMMDDHHMM.awb\n// e.g. +6421XXXXXXX-2603112045.awb\nlet phoneRaw = null;\nlet callDate = new Date().toISOString().slice(0, 10);\n\nconst nameNoExt = filename.replace(/\\.\\w+$/, '');\nconst parts = nameNoExt.split('-');\nconst lastPart = parts[parts.length - 1];\n\nif (/^\\d{10}$/.test(lastPart)) {\n  // Last segment is YYMMDDHHMM timestamp\n  const yy = lastPart.slice(0, 2);\n  const mm = lastPart.slice(2, 4);\n  const dd = lastPart.slice(4, 6);\n  callDate = `20${yy}-${mm}-${dd}`;\n  phoneRaw = parts.slice(0, -1).join('-');\n} else {\n  // Fallback: regex scan for phone number anywhere in filename\n  const e164Match = filename.match(/\\+64\\d{8,10}/);\n  if (e164Match) {\n    phoneRaw = e164Match[0];\n  } else {\n    const localMatch = filename.match(/0[2-9]\\d{7,9}/);\n    if (localMatch) phoneRaw = localMatch[0];\n  }\n  // Fallback date: YYYYMMDD pattern\n  const dateMatch = filename.match(/(\\d{8})/);\n  if (dateMatch) {\n    const rawDate = dateMatch[1];\n    callDate = `${rawDate.slice(0,4)}-${rawDate.slice(4,6)}-${rawDate.slice(6,8)}`;\n  }\n}\n\nconst phone = phoneRaw ? normalizePhone(phoneRaw) : null;\n\nreturn [{ json: { file_id: fileId, filename, phone_e164: phone, call_date: callDate } }];"
       },
-      "id": "5b7115fc-4aa8-4dc8-b0e6-7134aabc506b",
+      "id": "6630ed16-4351-415d-a91a-dc4c01e78909",
       "name": "Extract Phone",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         592,
-        376
+        384
       ]
     },
     {
@@ -85,13 +85,13 @@
         "combineFilters": "AND",
         "options": {}
       },
-      "id": "29f3d48a-1f9f-416a-8452-d65170959454",
+      "id": "856247d4-0f23-4551-b2dc-ebc3c68eadb5",
       "name": "Read Leads Sheet",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
       "position": [
         816,
-        376
+        384
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -104,13 +104,13 @@
       "parameters": {
         "jsCode": "const phone = $('Extract Phone').item.json.phone_e164;\n\n// No phone in filename \u2014 not a trackable call\nif (!phone) {\n  return [{ json: { matched: false, lead_name: null, lead_agency: null, lead_mobile: null } }];\n}\n\nfunction normalize(p) {\n  if (!p) return '';\n  return p.replace(/[\\s\\-\\(\\)]/g, '').replace(/^\\+64/, '0').replace(/^64/, '0');\n}\n\nconst target = normalize(phone);\nconst rows   = $input.all();\nlet match    = null;\n\nfor (const item of rows) {\n  const mobile = (item.json['Mobile'] || '').trim();\n  if (normalize(mobile) === target) { match = item.json; break; }\n}\n\nif (!match) {\n  return [{ json: { matched: false, lead_name: null, lead_agency: null, lead_mobile: null } }];\n}\n\nreturn [{ json: {\n  matched:      true,\n  lead_name:    match['Name']   || 'Unknown',\n  lead_agency:  match['Agency'] || '',\n  lead_mobile:  match['Mobile'] || phone,\n  lead_city:    match['City']   || '',\n  lead_email:   match['Email']  || '',\n}}];"
       },
-      "id": "47359247-de60-4435-910d-8d405ca23159",
+      "id": "b9b8d902-e7e1-4db5-9a5f-2079c148cb5e",
       "name": "Match Lead",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         1040,
-        376
+        384
       ]
     },
     {
@@ -123,7 +123,7 @@
           },
           "conditions": [
             {
-              "id": "05c53e0f-ecf4-4776-b592-960c2a88464b",
+              "id": "95747cb6-84ae-42c9-97cb-206bffad01e6",
               "leftValue": "={{ $json.matched }}",
               "rightValue": true,
               "operator": {
@@ -137,13 +137,13 @@
         },
         "options": {}
       },
-      "id": "c9baf6c9-f36a-462b-bab7-5e6897bb475b",
+      "id": "07882bd9-06ce-449e-a4af-49fad163cb60",
       "name": "Lead Matched?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
       "position": [
         1264,
-        376
+        384
       ]
     },
     {
@@ -156,13 +156,13 @@
         },
         "options": {}
       },
-      "id": "fe83349c-bceb-480d-91d2-b72b0e9c905e",
+      "id": "db814a33-4c20-4dde-aad2-d9440191473a",
       "name": "Download Audio",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
       "position": [
         1488,
-        376
+        384
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
@@ -176,13 +176,13 @@
         "resource": "file",
         "fileInput": "data"
       },
-      "id": "52067456-0f37-4668-b150-08ed128847d9",
+      "id": "019d7eb3-3c6f-4681-9f9d-288b7d6eac0c",
       "name": "Upload to AssemblyAI",
       "type": "n8n-nodes-assemblyai.assemblyAi",
       "typeVersion": 1,
       "position": [
         1712,
-        376
+        384
       ],
       "credentials": {
         "assemblyAiApi": {
@@ -199,13 +199,13 @@
           "speech_models": "universal-2"
         }
       },
-      "id": "b6255500-4a68-4470-8733-271dcd422ba7",
+      "id": "d312be1e-57d4-446c-91eb-9eb1f2468923",
       "name": "Submit Transcription",
       "type": "n8n-nodes-assemblyai.assemblyAi",
       "typeVersion": 1,
       "position": [
         1936,
-        376
+        384
       ],
       "credentials": {
         "assemblyAiApi": {
@@ -215,23 +215,25 @@
       }
     },
     {
-      "parameters": {},
-      "id": "9a39f96a-f9e7-4621-9f24-e31382d30fd4",
+      "parameters": {
+        "amount": 10
+      },
+      "id": "f0b7425f-0705-4464-9c43-dd3fb0eb9162",
       "name": "Wait for Transcription",
       "type": "n8n-nodes-base.wait",
       "typeVersion": 1.1,
       "position": [
         2160,
-        376
+        384
       ],
-      "webhookId": "aaaaaaaa-0000-0000-0000-000000000006"
+      "webhookId": "563bdce4-5ede-4c71-bcb8-909de257add0"
     },
     {
       "parameters": {
         "operation": "get",
         "transcriptId": "={{ $('Submit Transcription').item.json.id }}"
       },
-      "id": "620ca372-854c-4bb4-af20-0651a3d79884",
+      "id": "8e9abe74-bf61-4fb5-b978-8d5730862341",
       "name": "Get Transcription",
       "type": "n8n-nodes-assemblyai.assemblyAi",
       "typeVersion": 1,
@@ -248,93 +250,60 @@
     },
     {
       "parameters": {
-        "rules": {
-          "values": [
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
             {
-              "conditions": {
-                "options": {
-                  "caseSensitive": true,
-                  "leftValue": "",
-                  "typeValidation": "strict",
-                  "version": 1
-                },
-                "conditions": [
-                  {
-                    "leftValue": "={{ $json.status }}",
-                    "rightValue": "completed",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    },
-                    "id": "057dc9b3-82d0-4169-8895-798afa616500"
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "completed"
-            },
-            {
-              "conditions": {
-                "options": {
-                  "caseSensitive": true,
-                  "leftValue": "",
-                  "typeValidation": "strict",
-                  "version": 1
-                },
-                "conditions": [
-                  {
-                    "leftValue": "={{ $json.status }}",
-                    "rightValue": "error",
-                    "operator": {
-                      "type": "string",
-                      "operation": "equals"
-                    },
-                    "id": "0c594a2e-d6d9-4ecd-b3e5-4ec66340ed11"
-                  }
-                ],
-                "combinator": "and"
-              },
-              "renameOutput": true,
-              "outputKey": "error"
+              "id": "9b99f7cb-00c1-4453-9c7f-8ceb4b5cc90a",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "completed",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
             }
-          ]
+          ],
+          "combinator": "and"
         },
         "options": {}
       },
-      "id": "754d0a38-c719-4488-882f-72087d7d4feb",
+      "id": "527e2044-1e79-4f30-a961-e05e0c7728e2",
       "name": "Check Status",
-      "type": "n8n-nodes-base.switch",
-      "typeVersion": 3,
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
       "position": [
         2608,
-        376
+        384
       ]
     },
     {
       "parameters": {
         "jsCode": "// Formats AssemblyAI completed transcript.\n// If speaker diarization is available, outputs \"Speaker A: ...\" lines.\n// Falls back to plain text if utterances are missing.\nconst json = $input.item.json;\n\nlet transcript = '';\nif (Array.isArray(json.utterances) && json.utterances.length > 0) {\n  transcript = json.utterances\n    .map(u => `Speaker ${u.speaker}: ${u.text}`)\n    .join('\\n');\n} else {\n  transcript = json.text || '';\n}\n\nreturn [{ json: { transcript } }];"
       },
-      "id": "41d5b31c-65ac-4412-b065-1410c2c60c0c",
+      "id": "203c009d-9e90-4693-af95-344bf19e3f2f",
       "name": "Extract Transcript",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         2832,
-        376
+        384
       ]
     },
     {
       "parameters": {
         "jsCode": "const lead      = $('Match Lead').item.json;\nconst callDate  = $('Extract Phone').item.json.call_date;\nconst transcript = $('Extract Transcript').item.json.transcript || '';\n\nconst prompt = `You are an assistant to an automation developer in New Zealand who works with real estate agents.\n\nAnalyse this discovery call transcript and return ONLY valid JSON with this exact structure:\n\n{\n  \"summary\": \"2-3 sentence summary of the call\",\n  \"pain_points\": [\"pain point 1\", \"pain point 2\"],\n  \"crm_tools\": [\"tool/CRM name\"],\n  \"agent_type\": \"e.g. Independent, Franchise, Residential, Commercial, Development\",\n  \"team_size\": \"e.g. Solo, 2-5, 5+\",\n  \"interest_level\": \"Hot | Warm | Cold\",\n  \"interest_reasoning\": \"1-2 sentences explaining why\",\n  \"suggested_automations\": [\n    {\"name\": \"automation name\", \"description\": \"how it would help this specific agent\"}\n  ],\n  \"next_steps\": [\"specific action 1\", \"specific action 2\"],\n  \"objections\": [\"objection 1 if any\"]\n}\n\nContext:\n- Lead name: ${lead.lead_name}\n- Agency: ${lead.lead_agency || 'Unknown'}\n- Call date: ${callDate}\n- NZ real estate CRMs to watch for: ARO Software, Rex, PropertyMe, Agentbox, MyDesktop, Vault\n- Common pain points: enquiry follow-up speed, appraisal prep, listing admin, open home follow-up, buyer nurturing\n- Automation pitch framing: human-in-the-loop \u2014 agent approves everything\n- Transcript may use \"Speaker A / Speaker B\" labels \u2014 Speaker A is typically Brandon (the caller), Speaker B is the agent (the lead)\n\nTranscript:\n${transcript}`;\n\nreturn [{ json: { prompt } }];"
       },
-      "id": "116e01dd-6fd3-45ec-96c5-ef87827a08e0",
+      "id": "40b3cf41-9f76-450a-a5d4-11c41abc4973",
       "name": "Build Claude Payload",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         3056,
-        376
+        384
       ]
     },
     {
@@ -354,13 +323,13 @@
         },
         "options": {}
       },
-      "id": "909c9dc9-96f8-4f7f-b060-22b72546c82d",
+      "id": "69006d82-8775-4065-8add-6c77194e227e",
       "name": "Analyse with Claude",
       "type": "@n8n/n8n-nodes-langchain.openAi",
       "typeVersion": 1,
       "position": [
         3280,
-        376
+        384
       ],
       "credentials": {
         "openAiApi": {
@@ -373,13 +342,13 @@
       "parameters": {
         "jsCode": "const json      = $input.item.json;\nconst lead      = $('Match Lead').item.json;\nconst phoneMeta = $('Extract Phone').item.json;\nconst transcript = $('Extract Transcript').item.json.transcript || '';\n\n// Anthropic node returns json.text; OpenAI node returns json.message.content\nlet raw = json.text || (json.message && json.message.content) || '';\nraw = raw.trim().replace(/^```json?\\s*/i, '').replace(/\\s*```$/, '');\n\nlet a;\ntry {\n  a = JSON.parse(raw);\n} catch(e) {\n  a = {\n    summary: 'Parse error \u2014 review transcript manually',\n    pain_points: [], crm_tools: [], agent_type: 'Unknown',\n    team_size: 'Unknown', interest_level: 'Unknown',\n    interest_reasoning: '', suggested_automations: [],\n    next_steps: ['Review transcript manually'], objections: [],\n  };\n}\n\nconst arr = (v) => Array.isArray(v) ? v : [];\n\nconst pain_str = arr(a.pain_points).join('; ');\nconst crm_str  = arr(a.crm_tools).join(', ');\nconst auto_str = arr(a.suggested_automations)\n  .map(x => typeof x === 'object' ? `${x.name}: ${x.description}` : String(x))\n  .join(' | ');\nconst next_str = arr(a.next_steps).join(' | ');\nconst obj_str  = arr(a.objections).join('; ');\n\nconst sms_body = [\n  `Call: ${lead.lead_name} (${lead.lead_agency || 'Unknown agency'}) \u2014 ${phoneMeta.call_date}`,\n  `Interest: ${a.interest_level} \u2014 ${a.interest_reasoning || ''}`,\n  `Pain: ${arr(a.pain_points).slice(0, 2).join(', ') || 'See report'}`,\n  `Next: ${arr(a.next_steps)[0] || 'Review notes'}`,\n].join('\\n');\n\nreturn [{ json: {\n  // Structured analysis\n  summary:                  a.summary || '',\n  pain_points_str:          pain_str,\n  crm_tools_str:            crm_str,\n  agent_type:               a.agent_type || '',\n  team_size:                a.team_size || '',\n  interest_level:           a.interest_level || '',\n  interest_reasoning:       a.interest_reasoning || '',\n  suggested_automations_str: auto_str,\n  next_steps_str:           next_str,\n  objections_str:           obj_str,\n  // Lead context\n  lead_name:    lead.lead_name,\n  lead_agency:  lead.lead_agency,\n  lead_mobile:  lead.lead_mobile,\n  call_date:    phoneMeta.call_date,\n  file_id:      phoneMeta.file_id,\n  // Full transcript\n  transcript,\n  // SMS\n  sms_body,\n}}];"
       },
-      "id": "9ae33573-b4b7-43e0-a1f0-849cbe5efe90",
+      "id": "ac6e466d-abda-4431-ba65-fd0d4367bee5",
       "name": "Parse Analysis",
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
       "position": [
         3632,
-        376
+        384
       ]
     },
     {
@@ -411,130 +380,17 @@
             "Recommended Next Steps": "={{ $json.next_steps_str }}",
             "Objections Raised": "={{ $json.objections_str }}",
             "Transcript": "={{ $json.transcript }}"
-          },
-          "matchingColumns": [],
-          "schema": [
-            {
-              "id": "Date",
-              "displayName": "Date",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "Lead Name",
-              "displayName": "Lead Name",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "Phone",
-              "displayName": "Phone",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "Summary",
-              "displayName": "Summary",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "Pain Points",
-              "displayName": "Pain Points",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "Tools / CRM Used",
-              "displayName": "Tools / CRM Used",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "Agent Type",
-              "displayName": "Agent Type",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "Interest Level",
-              "displayName": "Interest Level",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "Suggested Automations",
-              "displayName": "Suggested Automations",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "Recommended Next Steps",
-              "displayName": "Recommended Next Steps",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "Objections Raised",
-              "displayName": "Objections Raised",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            },
-            {
-              "id": "Transcript",
-              "displayName": "Transcript",
-              "required": false,
-              "defaultMatch": false,
-              "display": true,
-              "type": "string",
-              "canBeUsedToMatch": true
-            }
-          ],
-          "attemptToConvertTypes": false,
-          "convertFieldsToString": false
+          }
         },
         "options": {}
       },
-      "id": "62ae439d-daef-4587-9cc0-c43824156242",
+      "id": "a1a79912-61ef-4d9b-88bb-864757db8449",
       "name": "Log to Discovery Calls",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
       "position": [
         3856,
-        376
+        384
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -560,7 +416,7 @@
         "columns": {
           "mappingMode": "defineBelow",
           "value": {
-            "Mobile": "={{ $json.lead_mobile }}",
+            "Mobile": "={{ $('Parse Analysis').item.json.lead_mobile }}",
             "Outcome": "Discovery Call Done",
             "row_number": 0
           },
@@ -620,6 +476,16 @@
             {
               "id": "Date Scraped",
               "displayName": "Date Scraped",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Type",
+              "displayName": "Type",
               "required": false,
               "defaultMatch": false,
               "display": true,
@@ -757,6 +623,76 @@
               "removed": false
             },
             {
+              "id": "Lead_Replies",
+              "displayName": "Lead_Replies",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Brandon_Replies",
+              "displayName": "Brandon_Replies",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Variant",
+              "displayName": "Variant",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "message_text",
+              "displayName": "message_text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "timestamp",
+              "displayName": "timestamp",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "_is_manual_reply",
+              "displayName": "_is_manual_reply",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "phone_for_conv",
+              "displayName": "phone_for_conv",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
               "id": "row_number",
               "displayName": "row_number",
               "required": false,
@@ -773,13 +709,13 @@
         },
         "options": {}
       },
-      "id": "f6efb014-fc70-4e25-bfbc-0149834906e3",
+      "id": "b0a2e5eb-a777-4f2d-9aac-40f2ab80346c",
       "name": "Update Leads Outcome",
       "type": "n8n-nodes-base.googleSheets",
       "typeVersion": 4,
       "position": [
         4080,
-        376
+        384
       ],
       "credentials": {
         "googleSheetsOAuth2Api": {
@@ -807,13 +743,13 @@
           "mode": "id"
         }
       },
-      "id": "796fb567-8dd0-43f6-9288-f5776258d405",
+      "id": "9345da7d-77f1-4a13-a55f-fefd9089befc",
       "name": "Move to Processed",
       "type": "n8n-nodes-base.googleDrive",
       "typeVersion": 3,
       "position": [
         4304,
-        376
+        384
       ],
       "credentials": {
         "googleDriveOAuth2Api": {
@@ -944,7 +880,6 @@
             "index": 0
           }
         ],
-        [],
         [
           {
             "node": "Wait for Transcription",
@@ -1028,16 +963,16 @@
   },
   "staticData": {
     "node:Google Drive Trigger": {
-      "lastTimeChecked": "2026-03-16T20:55:38Z"
+      "lastTimeChecked": "2026-04-01T20:22:15Z"
     }
   },
   "meta": {
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "07a2a3d7-3169-49a0-b86b-d7dfab129fc6",
-  "activeVersionId": "07a2a3d7-3169-49a0-b86b-d7dfab129fc6",
-  "versionCounter": 91,
+  "versionId": "c002f056-5b06-43fc-8b37-a1ef93f7d6d9",
+  "activeVersionId": "d73ab96c-8019-4e64-a0a5-9a60912973a6",
+  "versionCounter": 179,
   "triggerCount": 1,
   "shared": [
     {
@@ -1045,34 +980,34 @@
       "createdAt": "2026-03-11T13:38:57.177Z",
       "role": "workflow:owner",
       "workflowId": "eUsM5MVxOsrEMDGx",
-      "projectId": "7SEyEnkrJFQZ387O",
+      "projectId": "YOUR_N8N_PROJECT_ID",
       "project": {
         "updatedAt": "2026-03-09T23:25:14.299Z",
         "createdAt": "2026-03-09T23:01:24.415Z",
-        "id": "7SEyEnkrJFQZ387O",
+        "id": "YOUR_N8N_PROJECT_ID",
         "name": "Your Name <your@email.com>",
         "type": "personal",
         "icon": null,
         "description": null,
-        "creatorId": "bbc22449-1cc6-48f3-a48e-2171661c253f"
+        "creatorId": "YOUR_N8N_USER_ID"
       }
     }
   ],
   "tags": [],
   "activeVersion": {
-    "updatedAt": "2026-03-15T23:19:35.000Z",
-    "createdAt": "2026-03-15T13:02:45.778Z",
-    "versionId": "07a2a3d7-3169-49a0-b86b-d7dfab129fc6",
+    "updatedAt": "2026-03-18T19:58:23.000Z",
+    "createdAt": "2026-03-18T19:53:04.972Z",
+    "versionId": "d73ab96c-8019-4e64-a0a5-9a60912973a6",
     "workflowId": "eUsM5MVxOsrEMDGx",
     "nodes": [
       {
         "parameters": {
-          "content": "## WF3 \u2014 Discovery Call Transcription\n\n**Trigger:** New audio file in Google Drive `Discovery Calls/incoming/`\n\n**What it does:**\n1. Extracts phone number from Oppo A5 filename\n2. Matches phone against Leads sheet\n3. If not a lead \u2192 stops immediately, file stays in incoming/ (personal call)\n4. Downloads audio \u2192 uploads to AssemblyAI \u2192 transcribes with speaker diarization\n5. Analyses transcript with Claude (pain points, CRM, interest level, next steps)\n6. Logs structured analysis + full transcript to 'Discovery Calls' tab\n7. Updates Outcome column in Leads tab\n8. Sends SMS summary to Brandon\n9. Moves file to `processed/`\n\n**Filename format (Oppo A5 built-in recorder):**\n`+6421XXXXXXX-YYMMDDHHMM.awb`",
+          "content": "## WF3 \u2014 Discovery Call Transcription\n\n**Trigger:** New audio file in Google Drive `Discovery Calls/incoming/`\n\n**What it does:**\n1. Extracts phone number from Oppo A5 filename\n2. Matches phone against Leads sheet\n3. If not a lead \u2192 stops immediately, file stays in incoming/ (personal call)\n4. Downloads audio \u2192 uploads to AssemblyAI \u2192 polls until transcription complete\n5. Analyses transcript with Claude (pain points, CRM, interest level, next steps)\n6. Logs structured analysis + full transcript to 'Discovery Calls' tab\n7. Updates Outcome column in Leads tab\n8. Sends SMS summary to Brandon\n9. Moves file to `processed/`\n\n**Filename format (Oppo A5 built-in recorder):**\n`+6421XXXXXXX-YYMMDDHHMM.awb`",
           "height": 400,
           "width": 480,
           "color": 4
         },
-        "id": "7aefd6cf-2fb0-4ff3-9bc0-30937b9e7673",
+        "id": "c9bf3f93-8836-49c8-b4e2-bf4dc0cfbdcb",
         "name": "Workflow Description",
         "type": "n8n-nodes-base.stickyNote",
         "typeVersion": 1,
@@ -1099,13 +1034,13 @@
           "event": "fileCreated",
           "options": {}
         },
-        "id": "28a23ccc-108c-44d1-af97-92ef31badc5b",
+        "id": "366500f7-e12f-4ed1-af2f-18d954e5c962",
         "name": "Google Drive Trigger",
         "type": "n8n-nodes-base.googleDriveTrigger",
         "typeVersion": 1,
         "position": [
           368,
-          376
+          384
         ],
         "credentials": {
           "googleDriveOAuth2Api": {
@@ -1118,13 +1053,13 @@
         "parameters": {
           "jsCode": "const filename = $input.item.json.name || '';\nconst fileId   = $input.item.json.id   || '';\n\nfunction normalizePhone(raw) {\n  if (!raw) return null;\n  const cleaned = raw.replace(/[\\s\\-\\(\\)]/g, '');\n  if (raw.startsWith('+64'))              return raw.replace(/[\\s\\-\\(\\)]/g, '');\n  if (cleaned.startsWith('64') && cleaned.length >= 11) return '+' + cleaned;\n  if (cleaned.startsWith('0'))            return '+64' + cleaned.slice(1);\n  return null;\n}\n\n// Oppo A5 built-in recorder format: {phone_number}-YYMMDDHHMM.awb\n// e.g. +6421XXXXXXX-2603112045.awb\nlet phoneRaw = null;\nlet callDate = new Date().toISOString().slice(0, 10);\n\nconst nameNoExt = filename.replace(/\\.\\w+$/, '');\nconst parts = nameNoExt.split('-');\nconst lastPart = parts[parts.length - 1];\n\nif (/^\\d{10}$/.test(lastPart)) {\n  // Last segment is YYMMDDHHMM timestamp\n  const yy = lastPart.slice(0, 2);\n  const mm = lastPart.slice(2, 4);\n  const dd = lastPart.slice(4, 6);\n  callDate = `20${yy}-${mm}-${dd}`;\n  phoneRaw = parts.slice(0, -1).join('-');\n} else {\n  // Fallback: regex scan for phone number anywhere in filename\n  const e164Match = filename.match(/\\+64\\d{8,10}/);\n  if (e164Match) {\n    phoneRaw = e164Match[0];\n  } else {\n    const localMatch = filename.match(/0[2-9]\\d{7,9}/);\n    if (localMatch) phoneRaw = localMatch[0];\n  }\n  // Fallback date: YYYYMMDD pattern\n  const dateMatch = filename.match(/(\\d{8})/);\n  if (dateMatch) {\n    const rawDate = dateMatch[1];\n    callDate = `${rawDate.slice(0,4)}-${rawDate.slice(4,6)}-${rawDate.slice(6,8)}`;\n  }\n}\n\nconst phone = phoneRaw ? normalizePhone(phoneRaw) : null;\n\nreturn [{ json: { file_id: fileId, filename, phone_e164: phone, call_date: callDate } }];"
         },
-        "id": "5b7115fc-4aa8-4dc8-b0e6-7134aabc506b",
+        "id": "6630ed16-4351-415d-a91a-dc4c01e78909",
         "name": "Extract Phone",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
           592,
-          376
+          384
         ]
       },
       {
@@ -1143,13 +1078,13 @@
           "combineFilters": "AND",
           "options": {}
         },
-        "id": "29f3d48a-1f9f-416a-8452-d65170959454",
+        "id": "856247d4-0f23-4551-b2dc-ebc3c68eadb5",
         "name": "Read Leads Sheet",
         "type": "n8n-nodes-base.googleSheets",
         "typeVersion": 4,
         "position": [
           816,
-          376
+          384
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
@@ -1162,13 +1097,13 @@
         "parameters": {
           "jsCode": "const phone = $('Extract Phone').item.json.phone_e164;\n\n// No phone in filename \u2014 not a trackable call\nif (!phone) {\n  return [{ json: { matched: false, lead_name: null, lead_agency: null, lead_mobile: null } }];\n}\n\nfunction normalize(p) {\n  if (!p) return '';\n  return p.replace(/[\\s\\-\\(\\)]/g, '').replace(/^\\+64/, '0').replace(/^64/, '0');\n}\n\nconst target = normalize(phone);\nconst rows   = $input.all();\nlet match    = null;\n\nfor (const item of rows) {\n  const mobile = (item.json['Mobile'] || '').trim();\n  if (normalize(mobile) === target) { match = item.json; break; }\n}\n\nif (!match) {\n  return [{ json: { matched: false, lead_name: null, lead_agency: null, lead_mobile: null } }];\n}\n\nreturn [{ json: {\n  matched:      true,\n  lead_name:    match['Name']   || 'Unknown',\n  lead_agency:  match['Agency'] || '',\n  lead_mobile:  match['Mobile'] || phone,\n  lead_city:    match['City']   || '',\n  lead_email:   match['Email']  || '',\n}}];"
         },
-        "id": "47359247-de60-4435-910d-8d405ca23159",
+        "id": "b9b8d902-e7e1-4db5-9a5f-2079c148cb5e",
         "name": "Match Lead",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
           1040,
-          376
+          384
         ]
       },
       {
@@ -1181,7 +1116,7 @@
             },
             "conditions": [
               {
-                "id": "05c53e0f-ecf4-4776-b592-960c2a88464b",
+                "id": "95747cb6-84ae-42c9-97cb-206bffad01e6",
                 "leftValue": "={{ $json.matched }}",
                 "rightValue": true,
                 "operator": {
@@ -1195,13 +1130,13 @@
           },
           "options": {}
         },
-        "id": "c9baf6c9-f36a-462b-bab7-5e6897bb475b",
+        "id": "07882bd9-06ce-449e-a4af-49fad163cb60",
         "name": "Lead Matched?",
         "type": "n8n-nodes-base.if",
         "typeVersion": 2,
         "position": [
           1264,
-          376
+          384
         ]
       },
       {
@@ -1214,13 +1149,13 @@
           },
           "options": {}
         },
-        "id": "fe83349c-bceb-480d-91d2-b72b0e9c905e",
+        "id": "db814a33-4c20-4dde-aad2-d9440191473a",
         "name": "Download Audio",
         "type": "n8n-nodes-base.googleDrive",
         "typeVersion": 3,
         "position": [
           1488,
-          376
+          384
         ],
         "credentials": {
           "googleDriveOAuth2Api": {
@@ -1234,13 +1169,13 @@
           "resource": "file",
           "fileInput": "data"
         },
-        "id": "52067456-0f37-4668-b150-08ed128847d9",
+        "id": "019d7eb3-3c6f-4681-9f9d-288b7d6eac0c",
         "name": "Upload to AssemblyAI",
         "type": "n8n-nodes-assemblyai.assemblyAi",
         "typeVersion": 1,
         "position": [
           1712,
-          376
+          384
         ],
         "credentials": {
           "assemblyAiApi": {
@@ -1257,13 +1192,13 @@
             "speech_models": "universal-2"
           }
         },
-        "id": "b6255500-4a68-4470-8733-271dcd422ba7",
+        "id": "d312be1e-57d4-446c-91eb-9eb1f2468923",
         "name": "Submit Transcription",
         "type": "n8n-nodes-assemblyai.assemblyAi",
         "typeVersion": 1,
         "position": [
           1936,
-          376
+          384
         ],
         "credentials": {
           "assemblyAiApi": {
@@ -1273,23 +1208,25 @@
         }
       },
       {
-        "parameters": {},
-        "id": "9a39f96a-f9e7-4621-9f24-e31382d30fd4",
+        "parameters": {
+          "amount": 10
+        },
+        "id": "f0b7425f-0705-4464-9c43-dd3fb0eb9162",
         "name": "Wait for Transcription",
         "type": "n8n-nodes-base.wait",
         "typeVersion": 1.1,
         "position": [
           2160,
-          376
+          384
         ],
-        "webhookId": "aaaaaaaa-0000-0000-0000-000000000006"
+        "webhookId": "563bdce4-5ede-4c71-bcb8-909de257add0"
       },
       {
         "parameters": {
           "operation": "get",
           "transcriptId": "={{ $('Submit Transcription').item.json.id }}"
         },
-        "id": "620ca372-854c-4bb4-af20-0651a3d79884",
+        "id": "8e9abe74-bf61-4fb5-b978-8d5730862341",
         "name": "Get Transcription",
         "type": "n8n-nodes-assemblyai.assemblyAi",
         "typeVersion": 1,
@@ -1306,93 +1243,60 @@
       },
       {
         "parameters": {
-          "rules": {
-            "values": [
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
               {
-                "conditions": {
-                  "options": {
-                    "caseSensitive": true,
-                    "leftValue": "",
-                    "typeValidation": "strict",
-                    "version": 1
-                  },
-                  "conditions": [
-                    {
-                      "leftValue": "={{ $json.status }}",
-                      "rightValue": "completed",
-                      "operator": {
-                        "type": "string",
-                        "operation": "equals"
-                      },
-                      "id": "057dc9b3-82d0-4169-8895-798afa616500"
-                    }
-                  ],
-                  "combinator": "and"
-                },
-                "renameOutput": true,
-                "outputKey": "completed"
-              },
-              {
-                "conditions": {
-                  "options": {
-                    "caseSensitive": true,
-                    "leftValue": "",
-                    "typeValidation": "strict",
-                    "version": 1
-                  },
-                  "conditions": [
-                    {
-                      "leftValue": "={{ $json.status }}",
-                      "rightValue": "error",
-                      "operator": {
-                        "type": "string",
-                        "operation": "equals"
-                      },
-                      "id": "0c594a2e-d6d9-4ecd-b3e5-4ec66340ed11"
-                    }
-                  ],
-                  "combinator": "and"
-                },
-                "renameOutput": true,
-                "outputKey": "error"
+                "id": "9b99f7cb-00c1-4453-9c7f-8ceb4b5cc90a",
+                "leftValue": "={{ $json.status }}",
+                "rightValue": "completed",
+                "operator": {
+                  "type": "string",
+                  "operation": "equals"
+                }
               }
-            ]
+            ],
+            "combinator": "and"
           },
           "options": {}
         },
-        "id": "754d0a38-c719-4488-882f-72087d7d4feb",
+        "id": "527e2044-1e79-4f30-a961-e05e0c7728e2",
         "name": "Check Status",
-        "type": "n8n-nodes-base.switch",
-        "typeVersion": 3,
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
         "position": [
           2608,
-          376
+          384
         ]
       },
       {
         "parameters": {
           "jsCode": "// Formats AssemblyAI completed transcript.\n// If speaker diarization is available, outputs \"Speaker A: ...\" lines.\n// Falls back to plain text if utterances are missing.\nconst json = $input.item.json;\n\nlet transcript = '';\nif (Array.isArray(json.utterances) && json.utterances.length > 0) {\n  transcript = json.utterances\n    .map(u => `Speaker ${u.speaker}: ${u.text}`)\n    .join('\\n');\n} else {\n  transcript = json.text || '';\n}\n\nreturn [{ json: { transcript } }];"
         },
-        "id": "41d5b31c-65ac-4412-b065-1410c2c60c0c",
+        "id": "203c009d-9e90-4693-af95-344bf19e3f2f",
         "name": "Extract Transcript",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
           2832,
-          376
+          384
         ]
       },
       {
         "parameters": {
           "jsCode": "const lead      = $('Match Lead').item.json;\nconst callDate  = $('Extract Phone').item.json.call_date;\nconst transcript = $('Extract Transcript').item.json.transcript || '';\n\nconst prompt = `You are an assistant to an automation developer in New Zealand who works with real estate agents.\n\nAnalyse this discovery call transcript and return ONLY valid JSON with this exact structure:\n\n{\n  \"summary\": \"2-3 sentence summary of the call\",\n  \"pain_points\": [\"pain point 1\", \"pain point 2\"],\n  \"crm_tools\": [\"tool/CRM name\"],\n  \"agent_type\": \"e.g. Independent, Franchise, Residential, Commercial, Development\",\n  \"team_size\": \"e.g. Solo, 2-5, 5+\",\n  \"interest_level\": \"Hot | Warm | Cold\",\n  \"interest_reasoning\": \"1-2 sentences explaining why\",\n  \"suggested_automations\": [\n    {\"name\": \"automation name\", \"description\": \"how it would help this specific agent\"}\n  ],\n  \"next_steps\": [\"specific action 1\", \"specific action 2\"],\n  \"objections\": [\"objection 1 if any\"]\n}\n\nContext:\n- Lead name: ${lead.lead_name}\n- Agency: ${lead.lead_agency || 'Unknown'}\n- Call date: ${callDate}\n- NZ real estate CRMs to watch for: ARO Software, Rex, PropertyMe, Agentbox, MyDesktop, Vault\n- Common pain points: enquiry follow-up speed, appraisal prep, listing admin, open home follow-up, buyer nurturing\n- Automation pitch framing: human-in-the-loop \u2014 agent approves everything\n- Transcript may use \"Speaker A / Speaker B\" labels \u2014 Speaker A is typically Brandon (the caller), Speaker B is the agent (the lead)\n\nTranscript:\n${transcript}`;\n\nreturn [{ json: { prompt } }];"
         },
-        "id": "116e01dd-6fd3-45ec-96c5-ef87827a08e0",
+        "id": "40b3cf41-9f76-450a-a5d4-11c41abc4973",
         "name": "Build Claude Payload",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
           3056,
-          376
+          384
         ]
       },
       {
@@ -1412,13 +1316,13 @@
           },
           "options": {}
         },
-        "id": "909c9dc9-96f8-4f7f-b060-22b72546c82d",
+        "id": "69006d82-8775-4065-8add-6c77194e227e",
         "name": "Analyse with Claude",
         "type": "@n8n/n8n-nodes-langchain.openAi",
         "typeVersion": 1,
         "position": [
           3280,
-          376
+          384
         ],
         "credentials": {
           "openAiApi": {
@@ -1431,13 +1335,13 @@
         "parameters": {
           "jsCode": "const json      = $input.item.json;\nconst lead      = $('Match Lead').item.json;\nconst phoneMeta = $('Extract Phone').item.json;\nconst transcript = $('Extract Transcript').item.json.transcript || '';\n\n// Anthropic node returns json.text; OpenAI node returns json.message.content\nlet raw = json.text || (json.message && json.message.content) || '';\nraw = raw.trim().replace(/^```json?\\s*/i, '').replace(/\\s*```$/, '');\n\nlet a;\ntry {\n  a = JSON.parse(raw);\n} catch(e) {\n  a = {\n    summary: 'Parse error \u2014 review transcript manually',\n    pain_points: [], crm_tools: [], agent_type: 'Unknown',\n    team_size: 'Unknown', interest_level: 'Unknown',\n    interest_reasoning: '', suggested_automations: [],\n    next_steps: ['Review transcript manually'], objections: [],\n  };\n}\n\nconst arr = (v) => Array.isArray(v) ? v : [];\n\nconst pain_str = arr(a.pain_points).join('; ');\nconst crm_str  = arr(a.crm_tools).join(', ');\nconst auto_str = arr(a.suggested_automations)\n  .map(x => typeof x === 'object' ? `${x.name}: ${x.description}` : String(x))\n  .join(' | ');\nconst next_str = arr(a.next_steps).join(' | ');\nconst obj_str  = arr(a.objections).join('; ');\n\nconst sms_body = [\n  `Call: ${lead.lead_name} (${lead.lead_agency || 'Unknown agency'}) \u2014 ${phoneMeta.call_date}`,\n  `Interest: ${a.interest_level} \u2014 ${a.interest_reasoning || ''}`,\n  `Pain: ${arr(a.pain_points).slice(0, 2).join(', ') || 'See report'}`,\n  `Next: ${arr(a.next_steps)[0] || 'Review notes'}`,\n].join('\\n');\n\nreturn [{ json: {\n  // Structured analysis\n  summary:                  a.summary || '',\n  pain_points_str:          pain_str,\n  crm_tools_str:            crm_str,\n  agent_type:               a.agent_type || '',\n  team_size:                a.team_size || '',\n  interest_level:           a.interest_level || '',\n  interest_reasoning:       a.interest_reasoning || '',\n  suggested_automations_str: auto_str,\n  next_steps_str:           next_str,\n  objections_str:           obj_str,\n  // Lead context\n  lead_name:    lead.lead_name,\n  lead_agency:  lead.lead_agency,\n  lead_mobile:  lead.lead_mobile,\n  call_date:    phoneMeta.call_date,\n  file_id:      phoneMeta.file_id,\n  // Full transcript\n  transcript,\n  // SMS\n  sms_body,\n}}];"
         },
-        "id": "9ae33573-b4b7-43e0-a1f0-849cbe5efe90",
+        "id": "ac6e466d-abda-4431-ba65-fd0d4367bee5",
         "name": "Parse Analysis",
         "type": "n8n-nodes-base.code",
         "typeVersion": 2,
         "position": [
           3632,
-          376
+          384
         ]
       },
       {
@@ -1469,130 +1373,17 @@
               "Recommended Next Steps": "={{ $json.next_steps_str }}",
               "Objections Raised": "={{ $json.objections_str }}",
               "Transcript": "={{ $json.transcript }}"
-            },
-            "matchingColumns": [],
-            "schema": [
-              {
-                "id": "Date",
-                "displayName": "Date",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Lead Name",
-                "displayName": "Lead Name",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Phone",
-                "displayName": "Phone",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Summary",
-                "displayName": "Summary",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Pain Points",
-                "displayName": "Pain Points",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Tools / CRM Used",
-                "displayName": "Tools / CRM Used",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Agent Type",
-                "displayName": "Agent Type",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Interest Level",
-                "displayName": "Interest Level",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Suggested Automations",
-                "displayName": "Suggested Automations",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Recommended Next Steps",
-                "displayName": "Recommended Next Steps",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Objections Raised",
-                "displayName": "Objections Raised",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Transcript",
-                "displayName": "Transcript",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              }
-            ],
-            "attemptToConvertTypes": false,
-            "convertFieldsToString": false
+            }
           },
           "options": {}
         },
-        "id": "62ae439d-daef-4587-9cc0-c43824156242",
+        "id": "a1a79912-61ef-4d9b-88bb-864757db8449",
         "name": "Log to Discovery Calls",
         "type": "n8n-nodes-base.googleSheets",
         "typeVersion": 4,
         "position": [
           3856,
-          376
+          384
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
@@ -1617,227 +1408,23 @@
           },
           "columns": {
             "mappingMode": "defineBelow",
-            "value": {
-              "Mobile": "={{ $json.lead_mobile }}",
-              "Outcome": "Discovery Call Done",
-              "row_number": 0
-            },
             "matchingColumns": [
               "Mobile"
             ],
-            "schema": [
-              {
-                "id": "Name",
-                "displayName": "Name",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "Mobile",
-                "displayName": "Mobile",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Email",
-                "displayName": "Email",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "Agency",
-                "displayName": "Agency",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "City",
-                "displayName": "City",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "Date Scraped",
-                "displayName": "Date Scraped",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "Initial Sent",
-                "displayName": "Initial Sent",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "Initial Message",
-                "displayName": "Initial Message",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "F1 Sent",
-                "displayName": "F1 Sent",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "F1 Message",
-                "displayName": "F1 Message",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "F2 Sent",
-                "displayName": "F2 Sent",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "F2 Message",
-                "displayName": "F2 Message",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "Replied",
-                "displayName": "Replied",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "Reply After",
-                "displayName": "Reply After",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "Reply Received",
-                "displayName": "Reply Received",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "Reply Text",
-                "displayName": "Reply Text",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "Outcome",
-                "displayName": "Outcome",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true
-              },
-              {
-                "id": "Notes",
-                "displayName": "Notes",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "Status",
-                "displayName": "Status",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "string",
-                "canBeUsedToMatch": true,
-                "removed": false
-              },
-              {
-                "id": "row_number",
-                "displayName": "row_number",
-                "required": false,
-                "defaultMatch": false,
-                "display": true,
-                "type": "number",
-                "canBeUsedToMatch": true,
-                "readOnly": true,
-                "removed": false
-              }
-            ],
-            "attemptToConvertTypes": false,
-            "convertFieldsToString": false
+            "value": {
+              "Mobile": "={{ $('Parse Analysis').item.json.lead_mobile }}",
+              "Outcome": "Discovery Call Done"
+            }
           },
           "options": {}
         },
-        "id": "f6efb014-fc70-4e25-bfbc-0149834906e3",
+        "id": "b0a2e5eb-a777-4f2d-9aac-40f2ab80346c",
         "name": "Update Leads Outcome",
         "type": "n8n-nodes-base.googleSheets",
         "typeVersion": 4,
         "position": [
           4080,
-          376
+          384
         ],
         "credentials": {
           "googleSheetsOAuth2Api": {
@@ -1865,13 +1452,13 @@
             "mode": "id"
           }
         },
-        "id": "796fb567-8dd0-43f6-9288-f5776258d405",
+        "id": "9345da7d-77f1-4a13-a55f-fefd9089befc",
         "name": "Move to Processed",
         "type": "n8n-nodes-base.googleDrive",
         "typeVersion": 3,
         "position": [
           4304,
-          376
+          384
         ],
         "credentials": {
           "googleDriveOAuth2Api": {
@@ -2002,7 +1589,6 @@
               "index": 0
             }
           ],
-          [],
           [
             {
               "node": "Wait for Transcription",
@@ -2080,17 +1666,17 @@
       }
     },
     "authors": "Your Name",
-    "name": "Version 07a2a3d7",
+    "name": "Version d73ab96c",
     "description": "",
     "autosaved": true,
     "workflowPublishHistory": [
       {
-        "createdAt": "2026-03-15T23:19:35.934Z",
-        "id": 42,
+        "createdAt": "2026-03-18T19:58:23.383Z",
+        "id": 151,
         "workflowId": "eUsM5MVxOsrEMDGx",
-        "versionId": "07a2a3d7-3169-49a0-b86b-d7dfab129fc6",
+        "versionId": "d73ab96c-8019-4e64-a0a5-9a60912973a6",
         "event": "activated",
-        "userId": "bbc22449-1cc6-48f3-a48e-2171661c253f"
+        "userId": "YOUR_N8N_USER_ID"
       }
     ]
   }
