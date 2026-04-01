@@ -1,0 +1,2097 @@
+{
+  "updatedAt": "2026-03-15T13:02:45.777Z",
+  "createdAt": "2026-03-11T13:38:57.175Z",
+  "id": "eUsM5MVxOsrEMDGx",
+  "name": "Call Transcription & Analysis (WF3)",
+  "description": null,
+  "active": true,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## WF3 \u2014 Discovery Call Transcription\n\n**Trigger:** New audio file in Google Drive `Discovery Calls/incoming/`\n\n**What it does:**\n1. Extracts phone number from Oppo A5 filename\n2. Matches phone against Leads sheet\n3. If not a lead \u2192 stops immediately, file stays in incoming/ (personal call)\n4. Downloads audio \u2192 uploads to AssemblyAI \u2192 transcribes with speaker diarization\n5. Analyses transcript with Claude (pain points, CRM, interest level, next steps)\n6. Logs structured analysis + full transcript to 'Discovery Calls' tab\n7. Updates Outcome column in Leads tab\n8. Sends SMS summary to Brandon\n9. Moves file to `processed/`\n\n**Filename format (Oppo A5 built-in recorder):**\n`+6421XXXXXXX-YYMMDDHHMM.awb`",
+        "height": 400,
+        "width": 480,
+        "color": 4
+      },
+      "id": "7aefd6cf-2fb0-4ff3-9bc0-30937b9e7673",
+      "name": "Workflow Description",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -208,
+        64
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "triggerOn": "specificFolder",
+        "folderToWatch": {
+          "__rl": true,
+          "value": "YOUR_GOOGLE_DRIVE_INCOMING_FOLDER_ID",
+          "mode": "id"
+        },
+        "event": "fileCreated",
+        "options": {}
+      },
+      "id": "28a23ccc-108c-44d1-af97-92ef31badc5b",
+      "name": "Google Drive Trigger",
+      "type": "n8n-nodes-base.googleDriveTrigger",
+      "typeVersion": 1,
+      "position": [
+        368,
+        376
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const filename = $input.item.json.name || '';\nconst fileId   = $input.item.json.id   || '';\n\nfunction normalizePhone(raw) {\n  if (!raw) return null;\n  const cleaned = raw.replace(/[\\s\\-\\(\\)]/g, '');\n  if (raw.startsWith('+64'))              return raw.replace(/[\\s\\-\\(\\)]/g, '');\n  if (cleaned.startsWith('64') && cleaned.length >= 11) return '+' + cleaned;\n  if (cleaned.startsWith('0'))            return '+64' + cleaned.slice(1);\n  return null;\n}\n\n// Oppo A5 built-in recorder format: {phone_number}-YYMMDDHHMM.awb\n// e.g. +6421XXXXXXX-2603112045.awb\nlet phoneRaw = null;\nlet callDate = new Date().toISOString().slice(0, 10);\n\nconst nameNoExt = filename.replace(/\\.\\w+$/, '');\nconst parts = nameNoExt.split('-');\nconst lastPart = parts[parts.length - 1];\n\nif (/^\\d{10}$/.test(lastPart)) {\n  // Last segment is YYMMDDHHMM timestamp\n  const yy = lastPart.slice(0, 2);\n  const mm = lastPart.slice(2, 4);\n  const dd = lastPart.slice(4, 6);\n  callDate = `20${yy}-${mm}-${dd}`;\n  phoneRaw = parts.slice(0, -1).join('-');\n} else {\n  // Fallback: regex scan for phone number anywhere in filename\n  const e164Match = filename.match(/\\+64\\d{8,10}/);\n  if (e164Match) {\n    phoneRaw = e164Match[0];\n  } else {\n    const localMatch = filename.match(/0[2-9]\\d{7,9}/);\n    if (localMatch) phoneRaw = localMatch[0];\n  }\n  // Fallback date: YYYYMMDD pattern\n  const dateMatch = filename.match(/(\\d{8})/);\n  if (dateMatch) {\n    const rawDate = dateMatch[1];\n    callDate = `${rawDate.slice(0,4)}-${rawDate.slice(4,6)}-${rawDate.slice(6,8)}`;\n  }\n}\n\nconst phone = phoneRaw ? normalizePhone(phoneRaw) : null;\n\nreturn [{ json: { file_id: fileId, filename, phone_e164: phone, call_date: callDate } }];"
+      },
+      "id": "5b7115fc-4aa8-4dc8-b0e6-7134aabc506b",
+      "name": "Extract Phone",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        592,
+        376
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name",
+          "cachedResultName": "Leads"
+        },
+        "combineFilters": "AND",
+        "options": {}
+      },
+      "id": "29f3d48a-1f9f-416a-8452-d65170959454",
+      "name": "Read Leads Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        816,
+        376
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const phone = $('Extract Phone').item.json.phone_e164;\n\n// No phone in filename \u2014 not a trackable call\nif (!phone) {\n  return [{ json: { matched: false, lead_name: null, lead_agency: null, lead_mobile: null } }];\n}\n\nfunction normalize(p) {\n  if (!p) return '';\n  return p.replace(/[\\s\\-\\(\\)]/g, '').replace(/^\\+64/, '0').replace(/^64/, '0');\n}\n\nconst target = normalize(phone);\nconst rows   = $input.all();\nlet match    = null;\n\nfor (const item of rows) {\n  const mobile = (item.json['Mobile'] || '').trim();\n  if (normalize(mobile) === target) { match = item.json; break; }\n}\n\nif (!match) {\n  return [{ json: { matched: false, lead_name: null, lead_agency: null, lead_mobile: null } }];\n}\n\nreturn [{ json: {\n  matched:      true,\n  lead_name:    match['Name']   || 'Unknown',\n  lead_agency:  match['Agency'] || '',\n  lead_mobile:  match['Mobile'] || phone,\n  lead_city:    match['City']   || '',\n  lead_email:   match['Email']  || '',\n}}];"
+      },
+      "id": "47359247-de60-4435-910d-8d405ca23159",
+      "name": "Match Lead",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1040,
+        376
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "05c53e0f-ecf4-4776-b592-960c2a88464b",
+              "leftValue": "={{ $json.matched }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "c9baf6c9-f36a-462b-bab7-5e6897bb475b",
+      "name": "Lead Matched?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        1264,
+        376
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Extract Phone').item.json.file_id }}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "id": "fe83349c-bceb-480d-91d2-b72b0e9c905e",
+      "name": "Download Audio",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        1488,
+        376
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "fileInput": "data"
+      },
+      "id": "52067456-0f37-4668-b150-08ed128847d9",
+      "name": "Upload to AssemblyAI",
+      "type": "n8n-nodes-assemblyai.assemblyAi",
+      "typeVersion": 1,
+      "position": [
+        1712,
+        376
+      ],
+      "credentials": {
+        "assemblyAiApi": {
+          "id": "YtiqC2dhtbZebB2l",
+          "name": "AssemblyAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "audioUrl": "={{ $json.upload_url }}",
+        "additionalFields": {
+          "speaker_labels": true,
+          "speech_models": "universal-2"
+        }
+      },
+      "id": "b6255500-4a68-4470-8733-271dcd422ba7",
+      "name": "Submit Transcription",
+      "type": "n8n-nodes-assemblyai.assemblyAi",
+      "typeVersion": 1,
+      "position": [
+        1936,
+        376
+      ],
+      "credentials": {
+        "assemblyAiApi": {
+          "id": "YtiqC2dhtbZebB2l",
+          "name": "AssemblyAI account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "9a39f96a-f9e7-4621-9f24-e31382d30fd4",
+      "name": "Wait for Transcription",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2160,
+        376
+      ],
+      "webhookId": "aaaaaaaa-0000-0000-0000-000000000006"
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "transcriptId": "={{ $('Submit Transcription').item.json.id }}"
+      },
+      "id": "620ca372-854c-4bb4-af20-0651a3d79884",
+      "name": "Get Transcription",
+      "type": "n8n-nodes-assemblyai.assemblyAi",
+      "typeVersion": 1,
+      "position": [
+        2384,
+        304
+      ],
+      "credentials": {
+        "assemblyAiApi": {
+          "id": "YtiqC2dhtbZebB2l",
+          "name": "AssemblyAI account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "completed",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "057dc9b3-82d0-4169-8895-798afa616500"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "completed"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 1
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.status }}",
+                    "rightValue": "error",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "0c594a2e-d6d9-4ecd-b3e5-4ec66340ed11"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "error"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "754d0a38-c719-4488-882f-72087d7d4feb",
+      "name": "Check Status",
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3,
+      "position": [
+        2608,
+        376
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Formats AssemblyAI completed transcript.\n// If speaker diarization is available, outputs \"Speaker A: ...\" lines.\n// Falls back to plain text if utterances are missing.\nconst json = $input.item.json;\n\nlet transcript = '';\nif (Array.isArray(json.utterances) && json.utterances.length > 0) {\n  transcript = json.utterances\n    .map(u => `Speaker ${u.speaker}: ${u.text}`)\n    .join('\\n');\n} else {\n  transcript = json.text || '';\n}\n\nreturn [{ json: { transcript } }];"
+      },
+      "id": "41d5b31c-65ac-4412-b065-1410c2c60c0c",
+      "name": "Extract Transcript",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2832,
+        376
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const lead      = $('Match Lead').item.json;\nconst callDate  = $('Extract Phone').item.json.call_date;\nconst transcript = $('Extract Transcript').item.json.transcript || '';\n\nconst prompt = `You are an assistant to an automation developer in New Zealand who works with real estate agents.\n\nAnalyse this discovery call transcript and return ONLY valid JSON with this exact structure:\n\n{\n  \"summary\": \"2-3 sentence summary of the call\",\n  \"pain_points\": [\"pain point 1\", \"pain point 2\"],\n  \"crm_tools\": [\"tool/CRM name\"],\n  \"agent_type\": \"e.g. Independent, Franchise, Residential, Commercial, Development\",\n  \"team_size\": \"e.g. Solo, 2-5, 5+\",\n  \"interest_level\": \"Hot | Warm | Cold\",\n  \"interest_reasoning\": \"1-2 sentences explaining why\",\n  \"suggested_automations\": [\n    {\"name\": \"automation name\", \"description\": \"how it would help this specific agent\"}\n  ],\n  \"next_steps\": [\"specific action 1\", \"specific action 2\"],\n  \"objections\": [\"objection 1 if any\"]\n}\n\nContext:\n- Lead name: ${lead.lead_name}\n- Agency: ${lead.lead_agency || 'Unknown'}\n- Call date: ${callDate}\n- NZ real estate CRMs to watch for: ARO Software, Rex, PropertyMe, Agentbox, MyDesktop, Vault\n- Common pain points: enquiry follow-up speed, appraisal prep, listing admin, open home follow-up, buyer nurturing\n- Automation pitch framing: human-in-the-loop \u2014 agent approves everything\n- Transcript may use \"Speaker A / Speaker B\" labels \u2014 Speaker A is typically Brandon (the caller), Speaker B is the agent (the lead)\n\nTranscript:\n${transcript}`;\n\nreturn [{ json: { prompt } }];"
+      },
+      "id": "116e01dd-6fd3-45ec-96c5-ef87827a08e0",
+      "name": "Build Claude Payload",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3056,
+        376
+      ]
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "gpt-4o-mini",
+          "cachedResultName": "gpt-4o-mini"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "={{ $('Build Claude Payload').item.json.prompt }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "909c9dc9-96f8-4f7f-b060-22b72546c82d",
+      "name": "Analyse with Claude",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1,
+      "position": [
+        3280,
+        376
+      ],
+      "credentials": {
+        "openAiApi": {
+          "id": "BcY5ADBAEsUMn54u",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const json      = $input.item.json;\nconst lead      = $('Match Lead').item.json;\nconst phoneMeta = $('Extract Phone').item.json;\nconst transcript = $('Extract Transcript').item.json.transcript || '';\n\n// Anthropic node returns json.text; OpenAI node returns json.message.content\nlet raw = json.text || (json.message && json.message.content) || '';\nraw = raw.trim().replace(/^```json?\\s*/i, '').replace(/\\s*```$/, '');\n\nlet a;\ntry {\n  a = JSON.parse(raw);\n} catch(e) {\n  a = {\n    summary: 'Parse error \u2014 review transcript manually',\n    pain_points: [], crm_tools: [], agent_type: 'Unknown',\n    team_size: 'Unknown', interest_level: 'Unknown',\n    interest_reasoning: '', suggested_automations: [],\n    next_steps: ['Review transcript manually'], objections: [],\n  };\n}\n\nconst arr = (v) => Array.isArray(v) ? v : [];\n\nconst pain_str = arr(a.pain_points).join('; ');\nconst crm_str  = arr(a.crm_tools).join(', ');\nconst auto_str = arr(a.suggested_automations)\n  .map(x => typeof x === 'object' ? `${x.name}: ${x.description}` : String(x))\n  .join(' | ');\nconst next_str = arr(a.next_steps).join(' | ');\nconst obj_str  = arr(a.objections).join('; ');\n\nconst sms_body = [\n  `Call: ${lead.lead_name} (${lead.lead_agency || 'Unknown agency'}) \u2014 ${phoneMeta.call_date}`,\n  `Interest: ${a.interest_level} \u2014 ${a.interest_reasoning || ''}`,\n  `Pain: ${arr(a.pain_points).slice(0, 2).join(', ') || 'See report'}`,\n  `Next: ${arr(a.next_steps)[0] || 'Review notes'}`,\n].join('\\n');\n\nreturn [{ json: {\n  // Structured analysis\n  summary:                  a.summary || '',\n  pain_points_str:          pain_str,\n  crm_tools_str:            crm_str,\n  agent_type:               a.agent_type || '',\n  team_size:                a.team_size || '',\n  interest_level:           a.interest_level || '',\n  interest_reasoning:       a.interest_reasoning || '',\n  suggested_automations_str: auto_str,\n  next_steps_str:           next_str,\n  objections_str:           obj_str,\n  // Lead context\n  lead_name:    lead.lead_name,\n  lead_agency:  lead.lead_agency,\n  lead_mobile:  lead.lead_mobile,\n  call_date:    phoneMeta.call_date,\n  file_id:      phoneMeta.file_id,\n  // Full transcript\n  transcript,\n  // SMS\n  sms_body,\n}}];"
+      },
+      "id": "9ae33573-b4b7-43e0-a1f0-849cbe5efe90",
+      "name": "Parse Analysis",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3632,
+        376
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Discovery Calls",
+          "mode": "name",
+          "cachedResultName": "Discovery Calls"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Date": "={{ $json.call_date }}",
+            "Lead Name": "={{ $json.lead_name }}",
+            "Phone": "={{ $json.lead_mobile }}",
+            "Summary": "={{ $json.summary }}",
+            "Pain Points": "={{ $json.pain_points_str }}",
+            "Tools / CRM Used": "={{ $json.crm_tools_str }}",
+            "Agent Type": "={{ $json.agent_type }}",
+            "Interest Level": "={{ $json.interest_level }}",
+            "Suggested Automations": "={{ $json.suggested_automations_str }}",
+            "Recommended Next Steps": "={{ $json.next_steps_str }}",
+            "Objections Raised": "={{ $json.objections_str }}",
+            "Transcript": "={{ $json.transcript }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Date",
+              "displayName": "Date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lead Name",
+              "displayName": "Lead Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Phone",
+              "displayName": "Phone",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Summary",
+              "displayName": "Summary",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Pain Points",
+              "displayName": "Pain Points",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Tools / CRM Used",
+              "displayName": "Tools / CRM Used",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Agent Type",
+              "displayName": "Agent Type",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Interest Level",
+              "displayName": "Interest Level",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Suggested Automations",
+              "displayName": "Suggested Automations",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Recommended Next Steps",
+              "displayName": "Recommended Next Steps",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Objections Raised",
+              "displayName": "Objections Raised",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Transcript",
+              "displayName": "Transcript",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "62ae439d-daef-4587-9cc0-c43824156242",
+      "name": "Log to Discovery Calls",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        3856,
+        376
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "documentId": {
+          "__rl": true,
+          "value": "YOUR_SPREADSHEET_ID",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Leads",
+          "mode": "name",
+          "cachedResultName": "Leads"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Mobile": "={{ $json.lead_mobile }}",
+            "Outcome": "Discovery Call Done",
+            "row_number": 0
+          },
+          "matchingColumns": [
+            "Mobile"
+          ],
+          "schema": [
+            {
+              "id": "Name",
+              "displayName": "Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Mobile",
+              "displayName": "Mobile",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Agency",
+              "displayName": "Agency",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "City",
+              "displayName": "City",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Date Scraped",
+              "displayName": "Date Scraped",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Initial Sent",
+              "displayName": "Initial Sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Initial Message",
+              "displayName": "Initial Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "F1 Sent",
+              "displayName": "F1 Sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "F1 Message",
+              "displayName": "F1 Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "F2 Sent",
+              "displayName": "F2 Sent",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "F2 Message",
+              "displayName": "F2 Message",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Replied",
+              "displayName": "Replied",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Reply After",
+              "displayName": "Reply After",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Reply Received",
+              "displayName": "Reply Received",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Reply Text",
+              "displayName": "Reply Text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Outcome",
+              "displayName": "Outcome",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Notes",
+              "displayName": "Notes",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Status",
+              "displayName": "Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "row_number",
+              "displayName": "row_number",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "readOnly": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "f6efb014-fc70-4e25-bfbc-0149834906e3",
+      "name": "Update Leads Outcome",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        4080,
+        376
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "move",
+        "fileId": {
+          "__rl": true,
+          "value": "={{ $('Extract Phone').item.json.file_id }}",
+          "mode": "id"
+        },
+        "driveId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "My Drive"
+        },
+        "folderId": {
+          "__rl": true,
+          "value": "YOUR_DISCOVERY_CALLS_SHEET_ID",
+          "mode": "id"
+        }
+      },
+      "id": "796fb567-8dd0-43f6-9288-f5776258d405",
+      "name": "Move to Processed",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        4304,
+        376
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
+          "name": "Google Drive account"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Google Drive Trigger": {
+      "main": [
+        [
+          {
+            "node": "Extract Phone",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Phone": {
+      "main": [
+        [
+          {
+            "node": "Read Leads Sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Leads Sheet": {
+      "main": [
+        [
+          {
+            "node": "Match Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Match Lead": {
+      "main": [
+        [
+          {
+            "node": "Lead Matched?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Lead Matched?": {
+      "main": [
+        [
+          {
+            "node": "Download Audio",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Download Audio": {
+      "main": [
+        [
+          {
+            "node": "Upload to AssemblyAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to AssemblyAI": {
+      "main": [
+        [
+          {
+            "node": "Submit Transcription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Submit Transcription": {
+      "main": [
+        [
+          {
+            "node": "Wait for Transcription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait for Transcription": {
+      "main": [
+        [
+          {
+            "node": "Get Transcription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Transcription": {
+      "main": [
+        [
+          {
+            "node": "Check Status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check Status": {
+      "main": [
+        [
+          {
+            "node": "Extract Transcript",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [],
+        [
+          {
+            "node": "Wait for Transcription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract Transcript": {
+      "main": [
+        [
+          {
+            "node": "Build Claude Payload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Claude Payload": {
+      "main": [
+        [
+          {
+            "node": "Analyse with Claude",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Analyse with Claude": {
+      "main": [
+        [
+          {
+            "node": "Parse Analysis",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Analysis": {
+      "main": [
+        [
+          {
+            "node": "Log to Discovery Calls",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log to Discovery Calls": {
+      "main": [
+        [
+          {
+            "node": "Update Leads Outcome",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Leads Outcome": {
+      "main": [
+        [
+          {
+            "node": "Move to Processed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": {
+    "node:Google Drive Trigger": {
+      "lastTimeChecked": "2026-03-16T20:55:38Z"
+    }
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "07a2a3d7-3169-49a0-b86b-d7dfab129fc6",
+  "activeVersionId": "07a2a3d7-3169-49a0-b86b-d7dfab129fc6",
+  "versionCounter": 91,
+  "triggerCount": 1,
+  "shared": [
+    {
+      "updatedAt": "2026-03-11T13:38:57.177Z",
+      "createdAt": "2026-03-11T13:38:57.177Z",
+      "role": "workflow:owner",
+      "workflowId": "eUsM5MVxOsrEMDGx",
+      "projectId": "7SEyEnkrJFQZ387O",
+      "project": {
+        "updatedAt": "2026-03-09T23:25:14.299Z",
+        "createdAt": "2026-03-09T23:01:24.415Z",
+        "id": "7SEyEnkrJFQZ387O",
+        "name": "Your Name <your@email.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "bbc22449-1cc6-48f3-a48e-2171661c253f"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": {
+    "updatedAt": "2026-03-15T23:19:35.000Z",
+    "createdAt": "2026-03-15T13:02:45.778Z",
+    "versionId": "07a2a3d7-3169-49a0-b86b-d7dfab129fc6",
+    "workflowId": "eUsM5MVxOsrEMDGx",
+    "nodes": [
+      {
+        "parameters": {
+          "content": "## WF3 \u2014 Discovery Call Transcription\n\n**Trigger:** New audio file in Google Drive `Discovery Calls/incoming/`\n\n**What it does:**\n1. Extracts phone number from Oppo A5 filename\n2. Matches phone against Leads sheet\n3. If not a lead \u2192 stops immediately, file stays in incoming/ (personal call)\n4. Downloads audio \u2192 uploads to AssemblyAI \u2192 transcribes with speaker diarization\n5. Analyses transcript with Claude (pain points, CRM, interest level, next steps)\n6. Logs structured analysis + full transcript to 'Discovery Calls' tab\n7. Updates Outcome column in Leads tab\n8. Sends SMS summary to Brandon\n9. Moves file to `processed/`\n\n**Filename format (Oppo A5 built-in recorder):**\n`+6421XXXXXXX-YYMMDDHHMM.awb`",
+          "height": 400,
+          "width": 480,
+          "color": 4
+        },
+        "id": "7aefd6cf-2fb0-4ff3-9bc0-30937b9e7673",
+        "name": "Workflow Description",
+        "type": "n8n-nodes-base.stickyNote",
+        "typeVersion": 1,
+        "position": [
+          -208,
+          64
+        ]
+      },
+      {
+        "parameters": {
+          "pollTimes": {
+            "item": [
+              {
+                "mode": "everyMinute"
+              }
+            ]
+          },
+          "triggerOn": "specificFolder",
+          "folderToWatch": {
+            "__rl": true,
+            "value": "YOUR_GOOGLE_DRIVE_INCOMING_FOLDER_ID",
+            "mode": "id"
+          },
+          "event": "fileCreated",
+          "options": {}
+        },
+        "id": "28a23ccc-108c-44d1-af97-92ef31badc5b",
+        "name": "Google Drive Trigger",
+        "type": "n8n-nodes-base.googleDriveTrigger",
+        "typeVersion": 1,
+        "position": [
+          368,
+          376
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": {
+            "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
+            "name": "Google Drive account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const filename = $input.item.json.name || '';\nconst fileId   = $input.item.json.id   || '';\n\nfunction normalizePhone(raw) {\n  if (!raw) return null;\n  const cleaned = raw.replace(/[\\s\\-\\(\\)]/g, '');\n  if (raw.startsWith('+64'))              return raw.replace(/[\\s\\-\\(\\)]/g, '');\n  if (cleaned.startsWith('64') && cleaned.length >= 11) return '+' + cleaned;\n  if (cleaned.startsWith('0'))            return '+64' + cleaned.slice(1);\n  return null;\n}\n\n// Oppo A5 built-in recorder format: {phone_number}-YYMMDDHHMM.awb\n// e.g. +6421XXXXXXX-2603112045.awb\nlet phoneRaw = null;\nlet callDate = new Date().toISOString().slice(0, 10);\n\nconst nameNoExt = filename.replace(/\\.\\w+$/, '');\nconst parts = nameNoExt.split('-');\nconst lastPart = parts[parts.length - 1];\n\nif (/^\\d{10}$/.test(lastPart)) {\n  // Last segment is YYMMDDHHMM timestamp\n  const yy = lastPart.slice(0, 2);\n  const mm = lastPart.slice(2, 4);\n  const dd = lastPart.slice(4, 6);\n  callDate = `20${yy}-${mm}-${dd}`;\n  phoneRaw = parts.slice(0, -1).join('-');\n} else {\n  // Fallback: regex scan for phone number anywhere in filename\n  const e164Match = filename.match(/\\+64\\d{8,10}/);\n  if (e164Match) {\n    phoneRaw = e164Match[0];\n  } else {\n    const localMatch = filename.match(/0[2-9]\\d{7,9}/);\n    if (localMatch) phoneRaw = localMatch[0];\n  }\n  // Fallback date: YYYYMMDD pattern\n  const dateMatch = filename.match(/(\\d{8})/);\n  if (dateMatch) {\n    const rawDate = dateMatch[1];\n    callDate = `${rawDate.slice(0,4)}-${rawDate.slice(4,6)}-${rawDate.slice(6,8)}`;\n  }\n}\n\nconst phone = phoneRaw ? normalizePhone(phoneRaw) : null;\n\nreturn [{ json: { file_id: fileId, filename, phone_e164: phone, call_date: callDate } }];"
+        },
+        "id": "5b7115fc-4aa8-4dc8-b0e6-7134aabc506b",
+        "name": "Extract Phone",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          592,
+          376
+        ]
+      },
+      {
+        "parameters": {
+          "documentId": {
+            "__rl": true,
+            "value": "YOUR_SPREADSHEET_ID",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Leads",
+            "mode": "name",
+            "cachedResultName": "Leads"
+          },
+          "combineFilters": "AND",
+          "options": {}
+        },
+        "id": "29f3d48a-1f9f-416a-8452-d65170959454",
+        "name": "Read Leads Sheet",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4,
+        "position": [
+          816,
+          376
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+            "name": "Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const phone = $('Extract Phone').item.json.phone_e164;\n\n// No phone in filename \u2014 not a trackable call\nif (!phone) {\n  return [{ json: { matched: false, lead_name: null, lead_agency: null, lead_mobile: null } }];\n}\n\nfunction normalize(p) {\n  if (!p) return '';\n  return p.replace(/[\\s\\-\\(\\)]/g, '').replace(/^\\+64/, '0').replace(/^64/, '0');\n}\n\nconst target = normalize(phone);\nconst rows   = $input.all();\nlet match    = null;\n\nfor (const item of rows) {\n  const mobile = (item.json['Mobile'] || '').trim();\n  if (normalize(mobile) === target) { match = item.json; break; }\n}\n\nif (!match) {\n  return [{ json: { matched: false, lead_name: null, lead_agency: null, lead_mobile: null } }];\n}\n\nreturn [{ json: {\n  matched:      true,\n  lead_name:    match['Name']   || 'Unknown',\n  lead_agency:  match['Agency'] || '',\n  lead_mobile:  match['Mobile'] || phone,\n  lead_city:    match['City']   || '',\n  lead_email:   match['Email']  || '',\n}}];"
+        },
+        "id": "47359247-de60-4435-910d-8d405ca23159",
+        "name": "Match Lead",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          1040,
+          376
+        ]
+      },
+      {
+        "parameters": {
+          "conditions": {
+            "options": {
+              "caseSensitive": true,
+              "leftValue": "",
+              "typeValidation": "strict"
+            },
+            "conditions": [
+              {
+                "id": "05c53e0f-ecf4-4776-b592-960c2a88464b",
+                "leftValue": "={{ $json.matched }}",
+                "rightValue": true,
+                "operator": {
+                  "type": "boolean",
+                  "operation": "true",
+                  "singleValue": true
+                }
+              }
+            ],
+            "combinator": "and"
+          },
+          "options": {}
+        },
+        "id": "c9baf6c9-f36a-462b-bab7-5e6897bb475b",
+        "name": "Lead Matched?",
+        "type": "n8n-nodes-base.if",
+        "typeVersion": 2,
+        "position": [
+          1264,
+          376
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "download",
+          "fileId": {
+            "__rl": true,
+            "value": "={{ $('Extract Phone').item.json.file_id }}",
+            "mode": "id"
+          },
+          "options": {}
+        },
+        "id": "fe83349c-bceb-480d-91d2-b72b0e9c905e",
+        "name": "Download Audio",
+        "type": "n8n-nodes-base.googleDrive",
+        "typeVersion": 3,
+        "position": [
+          1488,
+          376
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": {
+            "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
+            "name": "Google Drive account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "resource": "file",
+          "fileInput": "data"
+        },
+        "id": "52067456-0f37-4668-b150-08ed128847d9",
+        "name": "Upload to AssemblyAI",
+        "type": "n8n-nodes-assemblyai.assemblyAi",
+        "typeVersion": 1,
+        "position": [
+          1712,
+          376
+        ],
+        "credentials": {
+          "assemblyAiApi": {
+            "id": "YtiqC2dhtbZebB2l",
+            "name": "AssemblyAI account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "audioUrl": "={{ $json.upload_url }}",
+          "additionalFields": {
+            "speaker_labels": true,
+            "speech_models": "universal-2"
+          }
+        },
+        "id": "b6255500-4a68-4470-8733-271dcd422ba7",
+        "name": "Submit Transcription",
+        "type": "n8n-nodes-assemblyai.assemblyAi",
+        "typeVersion": 1,
+        "position": [
+          1936,
+          376
+        ],
+        "credentials": {
+          "assemblyAiApi": {
+            "id": "YtiqC2dhtbZebB2l",
+            "name": "AssemblyAI account"
+          }
+        }
+      },
+      {
+        "parameters": {},
+        "id": "9a39f96a-f9e7-4621-9f24-e31382d30fd4",
+        "name": "Wait for Transcription",
+        "type": "n8n-nodes-base.wait",
+        "typeVersion": 1.1,
+        "position": [
+          2160,
+          376
+        ],
+        "webhookId": "aaaaaaaa-0000-0000-0000-000000000006"
+      },
+      {
+        "parameters": {
+          "operation": "get",
+          "transcriptId": "={{ $('Submit Transcription').item.json.id }}"
+        },
+        "id": "620ca372-854c-4bb4-af20-0651a3d79884",
+        "name": "Get Transcription",
+        "type": "n8n-nodes-assemblyai.assemblyAi",
+        "typeVersion": 1,
+        "position": [
+          2384,
+          304
+        ],
+        "credentials": {
+          "assemblyAiApi": {
+            "id": "YtiqC2dhtbZebB2l",
+            "name": "AssemblyAI account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "rules": {
+            "values": [
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 1
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.status }}",
+                      "rightValue": "completed",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      },
+                      "id": "057dc9b3-82d0-4169-8895-798afa616500"
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "completed"
+              },
+              {
+                "conditions": {
+                  "options": {
+                    "caseSensitive": true,
+                    "leftValue": "",
+                    "typeValidation": "strict",
+                    "version": 1
+                  },
+                  "conditions": [
+                    {
+                      "leftValue": "={{ $json.status }}",
+                      "rightValue": "error",
+                      "operator": {
+                        "type": "string",
+                        "operation": "equals"
+                      },
+                      "id": "0c594a2e-d6d9-4ecd-b3e5-4ec66340ed11"
+                    }
+                  ],
+                  "combinator": "and"
+                },
+                "renameOutput": true,
+                "outputKey": "error"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "754d0a38-c719-4488-882f-72087d7d4feb",
+        "name": "Check Status",
+        "type": "n8n-nodes-base.switch",
+        "typeVersion": 3,
+        "position": [
+          2608,
+          376
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "// Formats AssemblyAI completed transcript.\n// If speaker diarization is available, outputs \"Speaker A: ...\" lines.\n// Falls back to plain text if utterances are missing.\nconst json = $input.item.json;\n\nlet transcript = '';\nif (Array.isArray(json.utterances) && json.utterances.length > 0) {\n  transcript = json.utterances\n    .map(u => `Speaker ${u.speaker}: ${u.text}`)\n    .join('\\n');\n} else {\n  transcript = json.text || '';\n}\n\nreturn [{ json: { transcript } }];"
+        },
+        "id": "41d5b31c-65ac-4412-b065-1410c2c60c0c",
+        "name": "Extract Transcript",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          2832,
+          376
+        ]
+      },
+      {
+        "parameters": {
+          "jsCode": "const lead      = $('Match Lead').item.json;\nconst callDate  = $('Extract Phone').item.json.call_date;\nconst transcript = $('Extract Transcript').item.json.transcript || '';\n\nconst prompt = `You are an assistant to an automation developer in New Zealand who works with real estate agents.\n\nAnalyse this discovery call transcript and return ONLY valid JSON with this exact structure:\n\n{\n  \"summary\": \"2-3 sentence summary of the call\",\n  \"pain_points\": [\"pain point 1\", \"pain point 2\"],\n  \"crm_tools\": [\"tool/CRM name\"],\n  \"agent_type\": \"e.g. Independent, Franchise, Residential, Commercial, Development\",\n  \"team_size\": \"e.g. Solo, 2-5, 5+\",\n  \"interest_level\": \"Hot | Warm | Cold\",\n  \"interest_reasoning\": \"1-2 sentences explaining why\",\n  \"suggested_automations\": [\n    {\"name\": \"automation name\", \"description\": \"how it would help this specific agent\"}\n  ],\n  \"next_steps\": [\"specific action 1\", \"specific action 2\"],\n  \"objections\": [\"objection 1 if any\"]\n}\n\nContext:\n- Lead name: ${lead.lead_name}\n- Agency: ${lead.lead_agency || 'Unknown'}\n- Call date: ${callDate}\n- NZ real estate CRMs to watch for: ARO Software, Rex, PropertyMe, Agentbox, MyDesktop, Vault\n- Common pain points: enquiry follow-up speed, appraisal prep, listing admin, open home follow-up, buyer nurturing\n- Automation pitch framing: human-in-the-loop \u2014 agent approves everything\n- Transcript may use \"Speaker A / Speaker B\" labels \u2014 Speaker A is typically Brandon (the caller), Speaker B is the agent (the lead)\n\nTranscript:\n${transcript}`;\n\nreturn [{ json: { prompt } }];"
+        },
+        "id": "116e01dd-6fd3-45ec-96c5-ef87827a08e0",
+        "name": "Build Claude Payload",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3056,
+          376
+        ]
+      },
+      {
+        "parameters": {
+          "modelId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "gpt-4o-mini",
+            "cachedResultName": "gpt-4o-mini"
+          },
+          "messages": {
+            "values": [
+              {
+                "content": "={{ $('Build Claude Payload').item.json.prompt }}"
+              }
+            ]
+          },
+          "options": {}
+        },
+        "id": "909c9dc9-96f8-4f7f-b060-22b72546c82d",
+        "name": "Analyse with Claude",
+        "type": "@n8n/n8n-nodes-langchain.openAi",
+        "typeVersion": 1,
+        "position": [
+          3280,
+          376
+        ],
+        "credentials": {
+          "openAiApi": {
+            "id": "BcY5ADBAEsUMn54u",
+            "name": "OpenAi account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "jsCode": "const json      = $input.item.json;\nconst lead      = $('Match Lead').item.json;\nconst phoneMeta = $('Extract Phone').item.json;\nconst transcript = $('Extract Transcript').item.json.transcript || '';\n\n// Anthropic node returns json.text; OpenAI node returns json.message.content\nlet raw = json.text || (json.message && json.message.content) || '';\nraw = raw.trim().replace(/^```json?\\s*/i, '').replace(/\\s*```$/, '');\n\nlet a;\ntry {\n  a = JSON.parse(raw);\n} catch(e) {\n  a = {\n    summary: 'Parse error \u2014 review transcript manually',\n    pain_points: [], crm_tools: [], agent_type: 'Unknown',\n    team_size: 'Unknown', interest_level: 'Unknown',\n    interest_reasoning: '', suggested_automations: [],\n    next_steps: ['Review transcript manually'], objections: [],\n  };\n}\n\nconst arr = (v) => Array.isArray(v) ? v : [];\n\nconst pain_str = arr(a.pain_points).join('; ');\nconst crm_str  = arr(a.crm_tools).join(', ');\nconst auto_str = arr(a.suggested_automations)\n  .map(x => typeof x === 'object' ? `${x.name}: ${x.description}` : String(x))\n  .join(' | ');\nconst next_str = arr(a.next_steps).join(' | ');\nconst obj_str  = arr(a.objections).join('; ');\n\nconst sms_body = [\n  `Call: ${lead.lead_name} (${lead.lead_agency || 'Unknown agency'}) \u2014 ${phoneMeta.call_date}`,\n  `Interest: ${a.interest_level} \u2014 ${a.interest_reasoning || ''}`,\n  `Pain: ${arr(a.pain_points).slice(0, 2).join(', ') || 'See report'}`,\n  `Next: ${arr(a.next_steps)[0] || 'Review notes'}`,\n].join('\\n');\n\nreturn [{ json: {\n  // Structured analysis\n  summary:                  a.summary || '',\n  pain_points_str:          pain_str,\n  crm_tools_str:            crm_str,\n  agent_type:               a.agent_type || '',\n  team_size:                a.team_size || '',\n  interest_level:           a.interest_level || '',\n  interest_reasoning:       a.interest_reasoning || '',\n  suggested_automations_str: auto_str,\n  next_steps_str:           next_str,\n  objections_str:           obj_str,\n  // Lead context\n  lead_name:    lead.lead_name,\n  lead_agency:  lead.lead_agency,\n  lead_mobile:  lead.lead_mobile,\n  call_date:    phoneMeta.call_date,\n  file_id:      phoneMeta.file_id,\n  // Full transcript\n  transcript,\n  // SMS\n  sms_body,\n}}];"
+        },
+        "id": "9ae33573-b4b7-43e0-a1f0-849cbe5efe90",
+        "name": "Parse Analysis",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          3632,
+          376
+        ]
+      },
+      {
+        "parameters": {
+          "operation": "append",
+          "documentId": {
+            "__rl": true,
+            "value": "YOUR_SPREADSHEET_ID",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Discovery Calls",
+            "mode": "name",
+            "cachedResultName": "Discovery Calls"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "Date": "={{ $json.call_date }}",
+              "Lead Name": "={{ $json.lead_name }}",
+              "Phone": "={{ $json.lead_mobile }}",
+              "Summary": "={{ $json.summary }}",
+              "Pain Points": "={{ $json.pain_points_str }}",
+              "Tools / CRM Used": "={{ $json.crm_tools_str }}",
+              "Agent Type": "={{ $json.agent_type }}",
+              "Interest Level": "={{ $json.interest_level }}",
+              "Suggested Automations": "={{ $json.suggested_automations_str }}",
+              "Recommended Next Steps": "={{ $json.next_steps_str }}",
+              "Objections Raised": "={{ $json.objections_str }}",
+              "Transcript": "={{ $json.transcript }}"
+            },
+            "matchingColumns": [],
+            "schema": [
+              {
+                "id": "Date",
+                "displayName": "Date",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Lead Name",
+                "displayName": "Lead Name",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Phone",
+                "displayName": "Phone",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Summary",
+                "displayName": "Summary",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Pain Points",
+                "displayName": "Pain Points",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Tools / CRM Used",
+                "displayName": "Tools / CRM Used",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Agent Type",
+                "displayName": "Agent Type",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Interest Level",
+                "displayName": "Interest Level",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Suggested Automations",
+                "displayName": "Suggested Automations",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Recommended Next Steps",
+                "displayName": "Recommended Next Steps",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Objections Raised",
+                "displayName": "Objections Raised",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Transcript",
+                "displayName": "Transcript",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {}
+        },
+        "id": "62ae439d-daef-4587-9cc0-c43824156242",
+        "name": "Log to Discovery Calls",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4,
+        "position": [
+          3856,
+          376
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+            "name": "Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "update",
+          "documentId": {
+            "__rl": true,
+            "value": "YOUR_SPREADSHEET_ID",
+            "mode": "id"
+          },
+          "sheetName": {
+            "__rl": true,
+            "value": "Leads",
+            "mode": "name",
+            "cachedResultName": "Leads"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "Mobile": "={{ $json.lead_mobile }}",
+              "Outcome": "Discovery Call Done",
+              "row_number": 0
+            },
+            "matchingColumns": [
+              "Mobile"
+            ],
+            "schema": [
+              {
+                "id": "Name",
+                "displayName": "Name",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Mobile",
+                "displayName": "Mobile",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Email",
+                "displayName": "Email",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Agency",
+                "displayName": "Agency",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "City",
+                "displayName": "City",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Date Scraped",
+                "displayName": "Date Scraped",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Initial Sent",
+                "displayName": "Initial Sent",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Initial Message",
+                "displayName": "Initial Message",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "F1 Sent",
+                "displayName": "F1 Sent",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "F1 Message",
+                "displayName": "F1 Message",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "F2 Sent",
+                "displayName": "F2 Sent",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "F2 Message",
+                "displayName": "F2 Message",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Replied",
+                "displayName": "Replied",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Reply After",
+                "displayName": "Reply After",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Reply Received",
+                "displayName": "Reply Received",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Reply Text",
+                "displayName": "Reply Text",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Outcome",
+                "displayName": "Outcome",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true
+              },
+              {
+                "id": "Notes",
+                "displayName": "Notes",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "Status",
+                "displayName": "Status",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "string",
+                "canBeUsedToMatch": true,
+                "removed": false
+              },
+              {
+                "id": "row_number",
+                "displayName": "row_number",
+                "required": false,
+                "defaultMatch": false,
+                "display": true,
+                "type": "number",
+                "canBeUsedToMatch": true,
+                "readOnly": true,
+                "removed": false
+              }
+            ],
+            "attemptToConvertTypes": false,
+            "convertFieldsToString": false
+          },
+          "options": {}
+        },
+        "id": "f6efb014-fc70-4e25-bfbc-0149834906e3",
+        "name": "Update Leads Outcome",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4,
+        "position": [
+          4080,
+          376
+        ],
+        "credentials": {
+          "googleSheetsOAuth2Api": {
+            "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
+            "name": "Google Sheets account"
+          }
+        }
+      },
+      {
+        "parameters": {
+          "operation": "move",
+          "fileId": {
+            "__rl": true,
+            "value": "={{ $('Extract Phone').item.json.file_id }}",
+            "mode": "id"
+          },
+          "driveId": {
+            "__rl": true,
+            "mode": "list",
+            "value": "My Drive"
+          },
+          "folderId": {
+            "__rl": true,
+            "value": "YOUR_DISCOVERY_CALLS_SHEET_ID",
+            "mode": "id"
+          }
+        },
+        "id": "796fb567-8dd0-43f6-9288-f5776258d405",
+        "name": "Move to Processed",
+        "type": "n8n-nodes-base.googleDrive",
+        "typeVersion": 3,
+        "position": [
+          4304,
+          376
+        ],
+        "credentials": {
+          "googleDriveOAuth2Api": {
+            "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
+            "name": "Google Drive account"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Google Drive Trigger": {
+        "main": [
+          [
+            {
+              "node": "Extract Phone",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract Phone": {
+        "main": [
+          [
+            {
+              "node": "Read Leads Sheet",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Read Leads Sheet": {
+        "main": [
+          [
+            {
+              "node": "Match Lead",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Match Lead": {
+        "main": [
+          [
+            {
+              "node": "Lead Matched?",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Lead Matched?": {
+        "main": [
+          [
+            {
+              "node": "Download Audio",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          []
+        ]
+      },
+      "Download Audio": {
+        "main": [
+          [
+            {
+              "node": "Upload to AssemblyAI",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Upload to AssemblyAI": {
+        "main": [
+          [
+            {
+              "node": "Submit Transcription",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Submit Transcription": {
+        "main": [
+          [
+            {
+              "node": "Wait for Transcription",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Wait for Transcription": {
+        "main": [
+          [
+            {
+              "node": "Get Transcription",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Get Transcription": {
+        "main": [
+          [
+            {
+              "node": "Check Status",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Check Status": {
+        "main": [
+          [
+            {
+              "node": "Extract Transcript",
+              "type": "main",
+              "index": 0
+            }
+          ],
+          [],
+          [
+            {
+              "node": "Wait for Transcription",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Extract Transcript": {
+        "main": [
+          [
+            {
+              "node": "Build Claude Payload",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Build Claude Payload": {
+        "main": [
+          [
+            {
+              "node": "Analyse with Claude",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Analyse with Claude": {
+        "main": [
+          [
+            {
+              "node": "Parse Analysis",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Parse Analysis": {
+        "main": [
+          [
+            {
+              "node": "Log to Discovery Calls",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Log to Discovery Calls": {
+        "main": [
+          [
+            {
+              "node": "Update Leads Outcome",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Update Leads Outcome": {
+        "main": [
+          [
+            {
+              "node": "Move to Processed",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "authors": "Your Name",
+    "name": "Version 07a2a3d7",
+    "description": "",
+    "autosaved": true,
+    "workflowPublishHistory": [
+      {
+        "createdAt": "2026-03-15T23:19:35.934Z",
+        "id": 42,
+        "workflowId": "eUsM5MVxOsrEMDGx",
+        "versionId": "07a2a3d7-3169-49a0-b86b-d7dfab129fc6",
+        "event": "activated",
+        "userId": "bbc22449-1cc6-48f3-a48e-2171661c253f"
+      }
+    ]
+  }
+}
