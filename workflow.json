@@ -1,7 +1,7 @@
 {
   "updatedAt": "2026-03-25T02:01:39.751Z",
   "createdAt": "2026-03-11T13:38:57.175Z",
-  "id": "eUsM5MVxOsrEMDGx",
+  "id": "YOUR_WF3_WORKFLOW_ID",
   "name": "Call Transcription & Analysis (WF3)",
   "description": null,
   "active": true,
@@ -186,7 +186,7 @@
       ],
       "credentials": {
         "assemblyAiApi": {
-          "id": "YtiqC2dhtbZebB2l",
+          "id": "YOUR_ASSEMBLYAI_CREDENTIAL_ID",
           "name": "AssemblyAI account"
         }
       }
@@ -209,7 +209,7 @@
       ],
       "credentials": {
         "assemblyAiApi": {
-          "id": "YtiqC2dhtbZebB2l",
+          "id": "YOUR_ASSEMBLYAI_CREDENTIAL_ID",
           "name": "AssemblyAI account"
         }
       }
@@ -243,7 +243,7 @@
       ],
       "credentials": {
         "assemblyAiApi": {
-          "id": "YtiqC2dhtbZebB2l",
+          "id": "YOUR_ASSEMBLYAI_CREDENTIAL_ID",
           "name": "AssemblyAI account"
         }
       }
@@ -333,7 +333,7 @@
       ],
       "credentials": {
         "openAiApi": {
-          "id": "BcY5ADBAEsUMn54u",
+          "id": "YOUR_OPENAI_CREDENTIAL_ID",
           "name": "OpenAi account"
         }
       }
@@ -970,8 +970,8 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "c002f056-5b06-43fc-8b37-a1ef93f7d6d9",
-  "activeVersionId": "d73ab96c-8019-4e64-a0a5-9a60912973a6",
+  "versionId": "YOUR_WF3_VERSION_ID",
+  "activeVersionId": "YOUR_WF3_ACTIVE_VERSION_ID",
   "versionCounter": 179,
   "triggerCount": 1,
   "shared": [
@@ -979,7 +979,7 @@
       "updatedAt": "2026-03-11T13:38:57.177Z",
       "createdAt": "2026-03-11T13:38:57.177Z",
       "role": "workflow:owner",
-      "workflowId": "eUsM5MVxOsrEMDGx",
+      "workflowId": "YOUR_WF3_WORKFLOW_ID",
       "projectId": "YOUR_N8N_PROJECT_ID",
       "project": {
         "updatedAt": "2026-03-09T23:25:14.299Z",
@@ -997,8 +997,8 @@
   "activeVersion": {
     "updatedAt": "2026-03-18T19:58:23.000Z",
     "createdAt": "2026-03-18T19:53:04.972Z",
-    "versionId": "d73ab96c-8019-4e64-a0a5-9a60912973a6",
-    "workflowId": "eUsM5MVxOsrEMDGx",
+    "versionId": "YOUR_WF3_ACTIVE_VERSION_ID",
+    "workflowId": "YOUR_WF3_WORKFLOW_ID",
     "nodes": [
       {
         "parameters": {
@@ -1179,7 +1179,7 @@
         ],
         "credentials": {
           "assemblyAiApi": {
-            "id": "YtiqC2dhtbZebB2l",
+            "id": "YOUR_ASSEMBLYAI_CREDENTIAL_ID",
             "name": "AssemblyAI account"
           }
         }
@@ -1202,7 +1202,7 @@
         ],
         "credentials": {
           "assemblyAiApi": {
-            "id": "YtiqC2dhtbZebB2l",
+            "id": "YOUR_ASSEMBLYAI_CREDENTIAL_ID",
             "name": "AssemblyAI account"
           }
         }
@@ -1236,7 +1236,7 @@
         ],
         "credentials": {
           "assemblyAiApi": {
-            "id": "YtiqC2dhtbZebB2l",
+            "id": "YOUR_ASSEMBLYAI_CREDENTIAL_ID",
             "name": "AssemblyAI account"
           }
         }
@@ -1326,7 +1326,7 @@
         ],
         "credentials": {
           "openAiApi": {
-            "id": "BcY5ADBAEsUMn54u",
+            "id": "YOUR_OPENAI_CREDENTIAL_ID",
             "name": "OpenAi account"
           }
         }
@@ -1673,8 +1673,8 @@
       {
         "createdAt": "2026-03-18T19:58:23.383Z",
         "id": 151,
-        "workflowId": "eUsM5MVxOsrEMDGx",
-        "versionId": "d73ab96c-8019-4e64-a0a5-9a60912973a6",
+        "workflowId": "YOUR_WF3_WORKFLOW_ID",
+        "versionId": "YOUR_WF3_ACTIVE_VERSION_ID",
         "event": "activated",
         "userId": "YOUR_N8N_USER_ID"
       }
