@@ -1,10 +1,10 @@
 {
-  "updatedAt": "2026-04-02T00:12:40.886Z",
+  "updatedAt": "2026-04-03T01:21:28.000Z",
   "createdAt": "2026-03-11T13:38:57.175Z",
   "id": "YOUR_WF3_WORKFLOW_ID",
   "name": "Call Transcription & Analysis (WF3)",
   "description": null,
-  "active": true,
+  "active": false,
   "isArchived": false,
   "nodes": [
     {
@@ -535,6 +535,46 @@
         },
         "options": {}
       }
+    },
+    {
+      "id": "a2c4e6f8-1234-5678-abcd-poll001guard1",
+      "name": "Guard Poll Attempts",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2340,
+        520
+      ],
+      "parameters": {
+        "jsCode": "const attempts = ($json.poll_attempts || 0) + 1;\nif (attempts > 20) {\n  const transcriptId = $json.id || 'unknown';\n  throw new Error('AssemblyAI poll timeout after ' + attempts + ' attempts (~' + Math.round(attempts / 2) + ' min). Transcript ID: ' + transcriptId);\n}\nreturn [{ json: { ...$json, poll_attempts: attempts } }];"
+      }
+    },
+    {
+      "id": "b3d5f7a9-2345-6789-bcde-unmatch001msg",
+      "name": "Notify Brandon - Unmatched File",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.1,
+      "position": [
+        1460,
+        520
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.textbee.dev/api/v1/gateway/devices/YOUR_TEXTBEE_DEVICE_ID/send-sms",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify({\"recipients\": [\"YOUR_BRANDON_PHONE\"],\"message\": \"WF3: call file not matched to a lead \u2014 \" + $('Extract Phone').item.json.filename + \". File stays in incoming/.\"}) }}",
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "YOUR_TEXTBEE_HEADER_AUTH_CREDENTIAL_ID",
+          "name": "Textbee API Key"
+        }
+      }
     }
   ],
   "connections": {
@@ -591,7 +631,13 @@
             "index": 0
           }
         ],
-        []
+        [
+          {
+            "node": "Notify Brandon - Unmatched File",
+            "type": "main",
+            "index": 0
+          }
+        ]
       ]
     },
     "Download Audio": {
@@ -667,7 +713,7 @@
         ],
         [
           {
-            "node": "Wait for Transcription",
+            "node": "Guard Poll Attempts",
             "type": "main",
             "index": 0
           }
@@ -739,6 +785,17 @@
           }
         ]
       ]
+    },
+    "Guard Poll Attempts": {
+      "main": [
+        [
+          {
+            "node": "Wait for Transcription",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
     }
   },
   "settings": {
@@ -756,8 +813,8 @@
   },
   "pinData": {},
   "versionId": "YOUR_WF3_VERSION_ID",
-  "activeVersionId": "YOUR_WF3_VERSION_ID",
-  "versionCounter": 183,
+  "activeVersionId": null,
+  "versionCounter": 191,
   "triggerCount": 1,
   "shared": [
     {
@@ -779,767 +836,5 @@
     }
   ],
   "tags": [],
-  "activeVersion": {
-    "updatedAt": "2026-04-02T00:12:40.893Z",
-    "createdAt": "2026-04-02T00:12:40.893Z",
-    "versionId": "YOUR_WF3_VERSION_ID",
-    "workflowId": "YOUR_WF3_WORKFLOW_ID",
-    "nodes": [
-      {
-        "id": "bffa25f1-5217-46af-9594-565f7cec32e8",
-        "name": "Workflow Description",
-        "type": "n8n-nodes-base.stickyNote",
-        "typeVersion": 1,
-        "position": [
-          -200,
-          60
-        ],
-        "parameters": {
-          "content": "## WF3 \u2014 Discovery Call Transcription\n\n**Trigger:** New audio file in Google Drive `Discovery Calls/incoming/`\n\n**What it does:**\n1. Extracts phone number from Oppo A5 filename\n2. Matches phone against Leads sheet\n3. If not a lead \u2192 stops immediately, file stays in incoming/ (personal call)\n4. Downloads audio \u2192 uploads to AssemblyAI \u2192 polls until transcription complete\n5. Analyses transcript with Claude (pain points, CRM, interest level, next steps)\n6. Logs structured analysis + full transcript to 'Discovery Calls' tab\n7. Updates Outcome column in Leads tab\n8. Sends SMS summary to Brandon\n9. Moves file to `processed/`\n\n**Filename format (Oppo A5 built-in recorder):**\n`+6421XXXXXXX-YYMMDDHHMM.awb`",
-          "height": 400,
-          "width": 480,
-          "color": 4
-        }
-      },
-      {
-        "id": "19106323-94af-4c2a-b56b-8e5c730217de",
-        "name": "Google Drive Trigger",
-        "type": "n8n-nodes-base.googleDriveTrigger",
-        "typeVersion": 1,
-        "position": [
-          360,
-          300
-        ],
-        "credentials": {
-          "googleDriveOAuth2Api": {
-            "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
-            "name": "Google Drive account"
-          }
-        },
-        "parameters": {
-          "triggerOn": "specificFolder",
-          "folderToWatch": {
-            "__rl": true,
-            "value": "YOUR_GOOGLE_DRIVE_INCOMING_FOLDER_ID",
-            "mode": "id"
-          },
-          "event": "fileCreated",
-          "pollTimes": {
-            "item": [
-              {
-                "mode": "everyMinute"
-              }
-            ]
-          }
-        }
-      },
-      {
-        "id": "3c22b112-30c7-461b-b9bf-5f74390dc190",
-        "name": "Extract Phone",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          580,
-          300
-        ],
-        "parameters": {
-          "jsCode": "const filename = $input.item.json.name || '';\nconst fileId   = $input.item.json.id   || '';\n\nfunction normalizePhone(raw) {\n  if (!raw) return null;\n  const cleaned = raw.replace(/[\\s\\-\\(\\)]/g, '');\n  if (raw.startsWith('+64'))              return raw.replace(/[\\s\\-\\(\\)]/g, '');\n  if (cleaned.startsWith('64') && cleaned.length >= 11) return '+' + cleaned;\n  if (cleaned.startsWith('0'))            return '+64' + cleaned.slice(1);\n  return null;\n}\n\n// Oppo A5 built-in recorder format: {phone_number}-YYMMDDHHMM.awb\n// e.g. +6421XXXXXXX-2603112045.awb\nlet phoneRaw = null;\nlet callDate = new Date().toISOString().slice(0, 10);\n\nconst nameNoExt = filename.replace(/\\.\\w+$/, '');\nconst parts = nameNoExt.split('-');\nconst lastPart = parts[parts.length - 1];\n\nif (/^\\d{10}$/.test(lastPart)) {\n  // Last segment is YYMMDDHHMM timestamp\n  const yy = lastPart.slice(0, 2);\n  const mm = lastPart.slice(2, 4);\n  const dd = lastPart.slice(4, 6);\n  callDate = `20${yy}-${mm}-${dd}`;\n  phoneRaw = parts.slice(0, -1).join('-');\n} else {\n  // Fallback: regex scan for phone number anywhere in filename\n  const e164Match = filename.match(/\\+64\\d{8,10}/);\n  if (e164Match) {\n    phoneRaw = e164Match[0];\n  } else {\n    const localMatch = filename.match(/0[2-9]\\d{7,9}/);\n    if (localMatch) phoneRaw = localMatch[0];\n  }\n  // Fallback date: YYYYMMDD pattern\n  const dateMatch = filename.match(/(\\d{8})/);\n  if (dateMatch) {\n    const rawDate = dateMatch[1];\n    callDate = `${rawDate.slice(0,4)}-${rawDate.slice(4,6)}-${rawDate.slice(6,8)}`;\n  }\n}\n\nconst phone = phoneRaw ? normalizePhone(phoneRaw) : null;\n\nreturn [{ json: { file_id: fileId, filename, phone_e164: phone, call_date: callDate } }];"
-        }
-      },
-      {
-        "id": "8e52ba64-00a5-4141-a2e1-0e8157f69567",
-        "name": "Read Leads Sheet",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4,
-        "position": [
-          800,
-          300
-        ],
-        "parameters": {
-          "operation": "read",
-          "documentId": {
-            "__rl": true,
-            "value": "YOUR_SPREADSHEET_ID",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Leads",
-            "mode": "name",
-            "cachedResultName": "Leads"
-          },
-          "filtersUI": {},
-          "combineFilters": "AND",
-          "options": {}
-        },
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
-            "name": "Google Sheets account"
-          }
-        }
-      },
-      {
-        "id": "3e6ffb23-9c34-4dc6-9c87-a6695b40ab1c",
-        "name": "Match Lead",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          1020,
-          300
-        ],
-        "parameters": {
-          "mode": "runOnceForAllItems",
-          "jsCode": "const phone = $('Extract Phone').item.json.phone_e164;\n\n// No phone in filename \u2014 not a trackable call\nif (!phone) {\n  return [{ json: { matched: false, lead_name: null, lead_agency: null, lead_mobile: null } }];\n}\n\nfunction normalize(p) {\n  if (!p) return '';\n  return p.replace(/[\\s\\-\\(\\)]/g, '').replace(/^\\+64/, '0').replace(/^64/, '0');\n}\n\nconst target = normalize(phone);\nconst rows   = $input.all();\nlet match    = null;\n\nfor (const item of rows) {\n  const mobile = (item.json['Mobile'] || '').trim();\n  if (normalize(mobile) === target) { match = item.json; break; }\n}\n\nif (!match) {\n  return [{ json: { matched: false, lead_name: null, lead_agency: null, lead_mobile: null } }];\n}\n\nreturn [{ json: {\n  matched:      true,\n  lead_name:    match['Name']   || 'Unknown',\n  lead_agency:  match['Agency'] || '',\n  lead_mobile:  match['Mobile'] || phone,\n  lead_city:    match['City']   || '',\n  lead_email:   match['Email']  || '',\n}}];"
-        }
-      },
-      {
-        "id": "5262e31e-04aa-439b-85e1-19a46f395a1b",
-        "name": "Lead Matched?",
-        "type": "n8n-nodes-base.if",
-        "typeVersion": 2,
-        "position": [
-          1240,
-          300
-        ],
-        "parameters": {
-          "conditions": {
-            "options": {
-              "caseSensitive": true,
-              "leftValue": "",
-              "typeValidation": "strict"
-            },
-            "conditions": [
-              {
-                "id": "a6713879-a6ac-4c81-a6d6-c84b86f95c2f",
-                "leftValue": "={{ $json.matched }}",
-                "rightValue": true,
-                "operator": {
-                  "type": "boolean",
-                  "operation": "true",
-                  "singleValue": true
-                }
-              }
-            ],
-            "combinator": "and"
-          }
-        }
-      },
-      {
-        "id": "d1649ee8-a86f-44c5-9db8-e0d2ee934ac8",
-        "name": "Download Audio",
-        "type": "n8n-nodes-base.googleDrive",
-        "typeVersion": 3,
-        "position": [
-          1460,
-          300
-        ],
-        "credentials": {
-          "googleDriveOAuth2Api": {
-            "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
-            "name": "Google Drive account"
-          }
-        },
-        "parameters": {
-          "operation": "download",
-          "fileId": {
-            "__rl": true,
-            "value": "={{ $('Extract Phone').item.json.file_id }}",
-            "mode": "id"
-          },
-          "binaryPropertyName": "data",
-          "options": {}
-        }
-      },
-      {
-        "id": "6f36a6d7-8b9e-4464-8272-6c9f2b98e9b5",
-        "name": "Upload to AssemblyAI",
-        "type": "n8n-nodes-assemblyai.assemblyAi",
-        "typeVersion": 1,
-        "position": [
-          1680,
-          300
-        ],
-        "credentials": {
-          "assemblyAiApi": {
-            "id": "YOUR_ASSEMBLYAI_CREDENTIAL_ID",
-            "name": "AssemblyAI account"
-          }
-        },
-        "parameters": {
-          "resource": "file",
-          "operation": "upload",
-          "fileInput": "data"
-        }
-      },
-      {
-        "id": "11629126-ca1a-4403-8351-32e560e4e7fd",
-        "name": "Submit Transcription",
-        "type": "n8n-nodes-assemblyai.assemblyAi",
-        "typeVersion": 1,
-        "position": [
-          1900,
-          300
-        ],
-        "credentials": {
-          "assemblyAiApi": {
-            "id": "YOUR_ASSEMBLYAI_CREDENTIAL_ID",
-            "name": "AssemblyAI account"
-          }
-        },
-        "parameters": {
-          "resource": "transcript",
-          "operation": "create",
-          "audioUrl": "={{ $json.upload_url }}",
-          "additionalFields": {
-            "speaker_labels": true,
-            "speech_models": "universal-2"
-          }
-        }
-      },
-      {
-        "id": "720bbd14-fb07-4644-9e16-8676828b8082",
-        "name": "Wait for Transcription",
-        "type": "n8n-nodes-base.wait",
-        "typeVersion": 1.1,
-        "position": [
-          2120,
-          300
-        ],
-        "parameters": {
-          "resume": "timeInterval",
-          "resumeAmount": 10,
-          "resumeUnit": "seconds"
-        },
-        "webhookId": "752228b9-0293-4617-bf45-4c57b0c19965"
-      },
-      {
-        "id": "53e2c88f-728a-427b-8be3-da2242043c9e",
-        "name": "Get Transcription",
-        "type": "n8n-nodes-assemblyai.assemblyAi",
-        "typeVersion": 1,
-        "position": [
-          2340,
-          300
-        ],
-        "credentials": {
-          "assemblyAiApi": {
-            "id": "YOUR_ASSEMBLYAI_CREDENTIAL_ID",
-            "name": "AssemblyAI account"
-          }
-        },
-        "parameters": {
-          "resource": "transcript",
-          "operation": "get",
-          "transcriptId": "={{ $('Submit Transcription').item.json.id }}"
-        }
-      },
-      {
-        "id": "9709bbce-0183-4342-97be-08bdb343afdf",
-        "name": "Check Status",
-        "type": "n8n-nodes-base.switch",
-        "typeVersion": 3,
-        "position": [
-          2560,
-          300
-        ],
-        "parameters": {
-          "fallbackOutput": "extra",
-          "rules": {
-            "values": [
-              {
-                "conditions": {
-                  "options": {
-                    "caseSensitive": true,
-                    "leftValue": "",
-                    "typeValidation": "strict"
-                  },
-                  "conditions": [
-                    {
-                      "id": "d2fa1147-2ebb-4ae8-b99e-3e9625270773",
-                      "leftValue": "={{ $json.status }}",
-                      "rightValue": "completed",
-                      "operator": {
-                        "type": "string",
-                        "operation": "equals"
-                      }
-                    }
-                  ],
-                  "combinator": "and"
-                },
-                "renameOutput": false
-              },
-              {
-                "conditions": {
-                  "options": {
-                    "caseSensitive": true,
-                    "leftValue": "",
-                    "typeValidation": "strict"
-                  },
-                  "conditions": [
-                    {
-                      "id": "4ef98a6b-1018-44bb-a829-1aecab09f9a1",
-                      "leftValue": "={{ $json.status }}",
-                      "rightValue": "error",
-                      "operator": {
-                        "type": "string",
-                        "operation": "equals"
-                      }
-                    }
-                  ],
-                  "combinator": "and"
-                },
-                "renameOutput": false
-              }
-            ]
-          }
-        }
-      },
-      {
-        "id": "51b6b789-c496-47aa-a129-c93e1805cbb1",
-        "name": "Notify Brandon - Transcription Error",
-        "type": "n8n-nodes-base.httpRequest",
-        "typeVersion": 4.1,
-        "position": [
-          2780,
-          500
-        ],
-        "parameters": {
-          "method": "POST",
-          "url": "https://api.textbee.dev/api/v1/gateway/devices/YOUR_TEXTBEE_DEVICE_ID/send-sms",
-          "sendBody": true,
-          "contentType": "raw",
-          "rawContentType": "application/json",
-          "body": "={{ JSON.stringify({\"recipients\": [\"YOUR_BRANDON_PHONE\"],\"message\": \"WF3 error: AssemblyAI transcription failed for \" + $('Extract Phone').item.json.filename + \" (status: \" + $json.status + \"). File stays in incoming/.\"}) }}",
-          "options": {},
-          "authentication": "genericCredentialType",
-          "genericAuthType": "httpHeaderAuth"
-        },
-        "credentials": {
-          "httpHeaderAuth": {
-            "id": "YOUR_TEXTBEE_HEADER_AUTH_CREDENTIAL_ID",
-            "name": "Textbee API Key"
-          }
-        }
-      },
-      {
-        "id": "deddb158-ef9e-4d69-86f3-abc190ef7b39",
-        "name": "Extract Transcript",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          2780,
-          300
-        ],
-        "parameters": {
-          "jsCode": "// Formats AssemblyAI completed transcript.\n// If speaker diarization is available, outputs \"Speaker A: ...\" lines.\n// Falls back to plain text if utterances are missing.\nconst json = $input.item.json;\n\nlet transcript = '';\nif (Array.isArray(json.utterances) && json.utterances.length > 0) {\n  transcript = json.utterances\n    .map(u => `Speaker ${u.speaker}: ${u.text}`)\n    .join('\\n');\n} else {\n  transcript = json.text || '';\n}\n\nreturn [{ json: { transcript } }];"
-        }
-      },
-      {
-        "id": "25f9b864-df61-4a5d-9a32-683ecb53f87d",
-        "name": "Build Claude Payload",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          3000,
-          300
-        ],
-        "parameters": {
-          "jsCode": "const lead      = $('Match Lead').item.json;\nconst callDate  = $('Extract Phone').item.json.call_date;\nconst transcript = $('Extract Transcript').item.json.transcript || '';\n\nconst prompt = `You are an assistant to an automation developer in New Zealand who works with real estate agents.\n\nAnalyse this discovery call transcript and return ONLY valid JSON with this exact structure:\n\n{\n  \"summary\": \"2-3 sentence summary of the call\",\n  \"pain_points\": [\"pain point 1\", \"pain point 2\"],\n  \"crm_tools\": [\"tool/CRM name\"],\n  \"agent_type\": \"e.g. Independent, Franchise, Residential, Commercial, Development\",\n  \"team_size\": \"e.g. Solo, 2-5, 5+\",\n  \"interest_level\": \"Hot | Warm | Cold\",\n  \"interest_reasoning\": \"1-2 sentences explaining why\",\n  \"suggested_automations\": [\n    {\"name\": \"automation name\", \"description\": \"how it would help this specific agent\"}\n  ],\n  \"next_steps\": [\"specific action 1\", \"specific action 2\"],\n  \"objections\": [\"objection 1 if any\"]\n}\n\nContext:\n- Lead name: ${lead.lead_name}\n- Agency: ${lead.lead_agency || 'Unknown'}\n- Call date: ${callDate}\n- NZ real estate CRMs to watch for: ARO Software, Rex, PropertyMe, Agentbox, MyDesktop, Vault\n- Common pain points: enquiry follow-up speed, appraisal prep, listing admin, open home follow-up, buyer nurturing\n- Automation pitch framing: human-in-the-loop \u2014 agent approves everything\n- Transcript may use \"Speaker A / Speaker B\" labels \u2014 Speaker A is typically Brandon (the caller), Speaker B is the agent (the lead)\n\nTranscript:\n${transcript}`;\n\nreturn [{ json: { prompt } }];"
-        }
-      },
-      {
-        "id": "7a1199f8-4060-41d4-8f36-5820579d8ded",
-        "name": "Analyse with Claude",
-        "type": "@n8n/n8n-nodes-langchain.openAi",
-        "typeVersion": 1,
-        "position": [
-          3220,
-          300
-        ],
-        "credentials": {
-          "openAiApi": {
-            "id": "YOUR_OPENAI_CREDENTIAL_ID",
-            "name": "OpenAi account"
-          }
-        },
-        "parameters": {
-          "modelId": {
-            "__rl": true,
-            "mode": "list",
-            "value": "gpt-4o-mini",
-            "cachedResultName": "gpt-4o-mini"
-          },
-          "messages": {
-            "values": [
-              {
-                "content": "={{ $('Build Claude Payload').item.json.prompt }}"
-              }
-            ]
-          },
-          "options": {
-            "systemMessage": "You are an assistant to an automation developer in New Zealand who works with real estate agents. Return ONLY valid JSON \u2014 no markdown, no explanation."
-          }
-        }
-      },
-      {
-        "id": "0a323720-8ec2-41b0-967e-014e54f618b7",
-        "name": "Parse Analysis",
-        "type": "n8n-nodes-base.code",
-        "typeVersion": 2,
-        "position": [
-          3440,
-          300
-        ],
-        "parameters": {
-          "jsCode": "const json      = $input.item.json;\nconst lead      = $('Match Lead').item.json;\nconst phoneMeta = $('Extract Phone').item.json;\nconst transcript = $('Extract Transcript').item.json.transcript || '';\n\n// Anthropic node returns json.text; OpenAI node returns json.message.content\nlet raw = json.text || (json.message && json.message.content) || '';\nraw = raw.trim().replace(/^```json?\\s*/i, '').replace(/\\s*```$/, '');\n\nlet a;\ntry {\n  a = JSON.parse(raw);\n} catch(e) {\n  a = {\n    summary: 'Parse error \u2014 review transcript manually',\n    pain_points: [], crm_tools: [], agent_type: 'Unknown',\n    team_size: 'Unknown', interest_level: 'Unknown',\n    interest_reasoning: '', suggested_automations: [],\n    next_steps: ['Review transcript manually'], objections: [],\n  };\n}\n\nconst arr = (v) => Array.isArray(v) ? v : [];\n\nconst pain_str = arr(a.pain_points).join('; ');\nconst crm_str  = arr(a.crm_tools).join(', ');\nconst auto_str = arr(a.suggested_automations)\n  .map(x => typeof x === 'object' ? `${x.name}: ${x.description}` : String(x))\n  .join(' | ');\nconst next_str = arr(a.next_steps).join(' | ');\nconst obj_str  = arr(a.objections).join('; ');\n\nconst sms_body = [\n  `Call: ${lead.lead_name} (${lead.lead_agency || 'Unknown agency'}) \u2014 ${phoneMeta.call_date}`,\n  `Interest: ${a.interest_level} \u2014 ${a.interest_reasoning || ''}`,\n  `Pain: ${arr(a.pain_points).slice(0, 2).join(', ') || 'See report'}`,\n  `Next: ${arr(a.next_steps)[0] || 'Review notes'}`,\n].join('\\n');\n\nreturn [{ json: {\n  // Structured analysis\n  summary:                  a.summary || '',\n  pain_points_str:          pain_str,\n  crm_tools_str:            crm_str,\n  agent_type:               a.agent_type || '',\n  team_size:                a.team_size || '',\n  interest_level:           a.interest_level || '',\n  interest_reasoning:       a.interest_reasoning || '',\n  suggested_automations_str: auto_str,\n  next_steps_str:           next_str,\n  objections_str:           obj_str,\n  // Lead context\n  lead_name:    lead.lead_name,\n  lead_agency:  lead.lead_agency,\n  lead_mobile:  lead.lead_mobile,\n  call_date:    phoneMeta.call_date,\n  file_id:      phoneMeta.file_id,\n  // Full transcript\n  transcript,\n  // SMS\n  sms_body,\n}}];"
-        }
-      },
-      {
-        "id": "893c9375-5eb6-488c-8811-5a0ff27e260b",
-        "name": "Log to Discovery Calls",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4,
-        "position": [
-          3660,
-          300
-        ],
-        "parameters": {
-          "operation": "append",
-          "documentId": {
-            "__rl": true,
-            "value": "YOUR_SPREADSHEET_ID",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Discovery Calls",
-            "mode": "name",
-            "cachedResultName": "Discovery Calls"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "value": {
-              "Date": "={{ $json.call_date }}",
-              "Lead Name": "={{ $json.lead_name }}",
-              "Phone": "={{ $json.lead_mobile }}",
-              "Summary": "={{ $json.summary }}",
-              "Pain Points": "={{ $json.pain_points_str }}",
-              "Tools / CRM Used": "={{ $json.crm_tools_str }}",
-              "Agent Type": "={{ $json.agent_type }}",
-              "Interest Level": "={{ $json.interest_level }}",
-              "Suggested Automations": "={{ $json.suggested_automations_str }}",
-              "Recommended Next Steps": "={{ $json.next_steps_str }}",
-              "Objections Raised": "={{ $json.objections_str }}",
-              "Transcript": "={{ $json.transcript }}"
-            }
-          },
-          "options": {}
-        },
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
-            "name": "Google Sheets account"
-          }
-        }
-      },
-      {
-        "id": "d0bb837b-f46e-4869-b802-510448954a3a",
-        "name": "Update Leads Outcome",
-        "type": "n8n-nodes-base.googleSheets",
-        "typeVersion": 4,
-        "position": [
-          3880,
-          300
-        ],
-        "parameters": {
-          "operation": "update",
-          "documentId": {
-            "__rl": true,
-            "value": "YOUR_SPREADSHEET_ID",
-            "mode": "id"
-          },
-          "sheetName": {
-            "__rl": true,
-            "value": "Leads",
-            "mode": "name",
-            "cachedResultName": "Leads"
-          },
-          "columns": {
-            "mappingMode": "defineBelow",
-            "matchingColumns": [
-              "Mobile"
-            ],
-            "value": {
-              "Mobile": "={{ $('Parse Analysis').item.json.lead_mobile }}",
-              "Outcome": "Discovery Call Done"
-            }
-          },
-          "options": {}
-        },
-        "credentials": {
-          "googleSheetsOAuth2Api": {
-            "id": "YOUR_GOOGLE_SHEETS_CREDENTIAL_ID",
-            "name": "Google Sheets account"
-          }
-        }
-      },
-      {
-        "id": "956c16d3-9f1f-446c-ab88-c923ac1eda6f",
-        "name": "Move to Processed",
-        "type": "n8n-nodes-base.googleDrive",
-        "typeVersion": 3,
-        "position": [
-          4320,
-          300
-        ],
-        "credentials": {
-          "googleDriveOAuth2Api": {
-            "id": "YOUR_GOOGLE_DRIVE_CREDENTIAL_ID",
-            "name": "Google Drive account"
-          }
-        },
-        "parameters": {
-          "operation": "move",
-          "fileId": {
-            "__rl": true,
-            "value": "={{ $('Extract Phone').item.json.file_id }}",
-            "mode": "id"
-          },
-          "folderId": {
-            "__rl": true,
-            "value": "YOUR_DISCOVERY_CALLS_SHEET_ID",
-            "mode": "id"
-          },
-          "options": {}
-        }
-      }
-    ],
-    "connections": {
-      "Google Drive Trigger": {
-        "main": [
-          [
-            {
-              "node": "Extract Phone",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Extract Phone": {
-        "main": [
-          [
-            {
-              "node": "Read Leads Sheet",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Read Leads Sheet": {
-        "main": [
-          [
-            {
-              "node": "Match Lead",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Match Lead": {
-        "main": [
-          [
-            {
-              "node": "Lead Matched?",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Lead Matched?": {
-        "main": [
-          [
-            {
-              "node": "Download Audio",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          []
-        ]
-      },
-      "Download Audio": {
-        "main": [
-          [
-            {
-              "node": "Upload to AssemblyAI",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Upload to AssemblyAI": {
-        "main": [
-          [
-            {
-              "node": "Submit Transcription",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Submit Transcription": {
-        "main": [
-          [
-            {
-              "node": "Wait for Transcription",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Wait for Transcription": {
-        "main": [
-          [
-            {
-              "node": "Get Transcription",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Get Transcription": {
-        "main": [
-          [
-            {
-              "node": "Check Status",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Check Status": {
-        "main": [
-          [
-            {
-              "node": "Extract Transcript",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "Notify Brandon - Transcription Error",
-              "type": "main",
-              "index": 0
-            }
-          ],
-          [
-            {
-              "node": "Wait for Transcription",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Extract Transcript": {
-        "main": [
-          [
-            {
-              "node": "Build Claude Payload",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Build Claude Payload": {
-        "main": [
-          [
-            {
-              "node": "Analyse with Claude",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Analyse with Claude": {
-        "main": [
-          [
-            {
-              "node": "Parse Analysis",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Parse Analysis": {
-        "main": [
-          [
-            {
-              "node": "Log to Discovery Calls",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Log to Discovery Calls": {
-        "main": [
-          [
-            {
-              "node": "Update Leads Outcome",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      },
-      "Update Leads Outcome": {
-        "main": [
-          [
-            {
-              "node": "Move to Processed",
-              "type": "main",
-              "index": 0
-            }
-          ]
-        ]
-      }
-    },
-    "authors": "Your Name",
-    "name": null,
-    "description": null,
-    "autosaved": false,
-    "workflowPublishHistory": [
-      {
-        "createdAt": "2026-04-02T00:12:41.692Z",
-        "id": 198,
-        "workflowId": "YOUR_WF3_WORKFLOW_ID",
-        "versionId": "YOUR_WF3_VERSION_ID",
-        "event": "activated",
-        "userId": "YOUR_N8N_USER_ID"
-      },
-      {
-        "createdAt": "2026-04-02T00:12:41.301Z",
-        "id": 197,
-        "workflowId": "YOUR_WF3_WORKFLOW_ID",
-        "versionId": "YOUR_WF3_VERSION_ID",
-        "event": "deactivated",
-        "userId": "YOUR_N8N_USER_ID"
-      }
-    ]
-  }
+  "activeVersion": null
 }
